@@ -47,11 +47,21 @@ const humanDelay = (min = MIN_HANDLER_DELAY_MS, max = MAX_HANDLER_DELAY_MS) =>
   new Promise(r => setTimeout(r, Math.floor(Math.random() * (max - min + 1)) + min));
 
 // ─── Extraction des codes Cryptobox ─────────────────────────────────────────
-const CODE_REGEX = /\b(?=[A-Z0-9]*[0-9])([A-Z0-9]{8,20})\b/g;
+// Les Red Packets Binance standard font EXACTEMENT 8 caractères (mix lettres/chiffres)
+const CODE_REGEX = /\b(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*[0-9])([A-Z0-9]{8})\b/g;
 const URL_CODE_REGEX = /(?:code=|cryptobox\/)([A-Za-z0-9]{6,20})/g;
+
+// Exclure les messages destinés à d'autres plateformes si Binance n'est pas mentionné
+const IGNORED_EXCHANGES = /bybit|okx|bitget|kucoin|mexc|gate\.?io|huobi|htx|bingx/i;
 
 function extractCodes(text) {
   if (!text) return [];
+
+  // Si le message mentionne un autre exchange sans mentionner Binance/Cryptobox, c'est probablement un faux positif
+  if (IGNORED_EXCHANGES.test(text) && !/binance|cryptobox/i.test(text)) {
+    return [];
+  }
+
   const upper = text.toUpperCase();
   const unique = new Set();
 
