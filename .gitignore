@@ -1,0 +1,19 @@
+# Fichiers générés automatiquement — ne pas versionner
+.env
+session.txt
+browser-data/
+history.json
+
+# Screenshots d'erreur Playwright
+error_*.png
+
+# Dépendances Node.js
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,33 @@
+{
+  "name": "red-packet-bot-telegram",
+  "version": "1.0.0",
+  "description": "Userbot Telegram qui surveille des canaux et réclame automatiquement les codes Cryptobox Binance via Playwright.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "telegram": "^2.26.22",
+    "input": "^1.0.1",
+    "node-cron": "^3.0.3",
+    "playwright": "^1.44.0"
+  },
+  "keywords": [
+    "telegram",
+    "userbot",
+    "binance",
+    "cryptobox",
+    "red-packet",
+    "playwright",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {},
+  "type": "commonjs"
+}
