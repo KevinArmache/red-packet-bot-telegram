@@ -11,8 +11,10 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@mtcute/core": "^0.29.7",
+    "@mtcute/dispatcher": "^0.29.7",
+    "@mtcute/node": "^0.29.7",
     "dotenv": "^16.4.5",
-    "telegram": "^2.26.22",
     "input": "^1.0.1",
     "node-cron": "^3.0.3",
     "playwright": "^1.44.0"
@@ -28,6 +30,5 @@
   ],
   "author": "",
   "license": "MIT",
-  "devDependencies": {},
   "type": "commonjs"
 }
