@@ -1,8 +1,10 @@
 # Fichiers générés automatiquement — ne pas versionner
 .env
 session.txt
+client.session*
 browser-data/
-history.json
+history.json*
+*.tmp
 
 # Screenshots d'erreur Playwright
 error_*.png

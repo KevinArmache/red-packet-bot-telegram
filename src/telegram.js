@@ -180,6 +180,9 @@ async function startTelegramClient(targetChannels, onCodeFound) {
 
       // ── Envoi des codes trouvés ────────────────────────────────────────
       for (const code of codes) {
+        // Double vérification anti-race condition
+        if (hasCode(code)) continue;
+
         if (!isRateLimitOk()) continue;
         logger.success(`🎁 Code trouvé : ${code} — depuis ${channelName}`);
         addCode(code);

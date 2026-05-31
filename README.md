@@ -25,11 +25,11 @@ red-packet-bot-telegram/
 │   ├── logger.js         # Système de logs horodatés
 │   ├── history.js        # Gestion anti-doublons (history.json)
 │   ├── queue.js          # File d'attente promise (traitement séquentiel)
-│   ├── telegram.js       # Client Telegram Userbot (gramjs)
+│   ├── telegram.js       # Client Telegram Userbot (mtcute)
 │   └── binance.js        # Automatisation Binance (Playwright)
 ├── browser-data/         # Données de session Chromium (auto-créé)
 ├── history.json          # Codes déjà réclamés (auto-créé)
-├── session.txt           # Session Telegram persistante (auto-créé)
+├── client.session*       # Session Telegram persistante mtcute (SQLite, auto-créé)
 ├── package.json
 ├── .env                  # ⚠️ NE PAS VERSIONNER
 └── .env.example          # Modèle de configuration
@@ -116,7 +116,7 @@ Entrez votre mot de passe 2FA Telegram :
 ```
 → Entrez votre mot de passe 2FA.
 
-La session sera sauvegardée dans `session.txt` — vous ne serez **plus redemandé** aux prochains lancements.
+La session sera sauvegardée dans `client.session` (base SQLite) — vous ne serez **plus redemandé** aux prochains lancements.
 
 #### 2. Connexion Binance
 Une fenêtre Chromium s'ouvre sur `https://www.binance.com/fr`.
@@ -249,6 +249,7 @@ sudo journalctl -u cryptobox-bot -f
 | **FloodWaitError** | Si Telegram dit « ralentis », le bot attend exactement le temps demandé + 5s de marge |
 | **Rate limiter** | Max **5 codes acceptés par minute** (configurable dans `src/telegram.js`) |
 | **Délai humain** | Pause aléatoire de 0,5–1,5 secondes avant chaque traitement de message |
+| **Anti-doublons** | Double vérification pour contrer les requêtes concurrentes sur le même code |
 | **Aucun historique** | Le bot n'accède **jamais** aux anciens messages (`getHistory` banni) |
 | **Écoute passive** | Le bot reçoit les messages par push (WebSocket), sans jamais poller |
 | **Backoff exponentiel** | En cas de déconnexion : 3s, 6s, 12s... avant de retenter |
@@ -284,8 +285,10 @@ Si vous voyez ces messages, **agissez immédiatement** (réduisez `MAX_CODES_PER
    ```gitignore
    .env
    session.txt
+   client.session*
    browser-data/
-   history.json
+   history.json*
+   *.tmp
    *.png
    ```
 3. **Numéro secondaire (idéal) :** Un numéro virtuel (Google Voice, Twilio, Skype) est l'option la plus sûre — si vous êtes banni, votre vrai compte est intact.
@@ -300,13 +303,13 @@ Si vous voyez ces messages, **agissez immédiatement** (réduisez `MAX_CODES_PER
 | Problème | Solution |
 |----------|----------|
 | `Variables d'environnement manquantes` | Vérifiez votre `.env` (copiez depuis `.env.example`) |
-| `Session Telegram invalide` | Supprimez `session.txt` et relancez |
+| `Session Telegram invalide` | Supprimez les fichiers `client.session*` et relancez |
 | `FLOOD_WAIT` fréquents | Réduire `MAX_CODES_PER_MINUTE` dans `src/telegram.js` |
 | `Sélecteur Playwright introuvable` | Mettez à jour `SELECTORS` dans `src/binance.js` (voir section dédiée) |
 | `Timeout connexion Binance` | Augmentez `BINANCE_LOGIN_TIMEOUT` dans `.env` |
 | Codes non détectés | Vérifiez que `TARGET_CHANNELS` contient le bon canal |
 | Bot plante au démarrage sur VPS | Installez les dépendances système : `npx playwright install-deps chromium` |
-| Compte Telegram déconnecté | Session expirée — supprimez `session.txt` et reconnectez-vous |
+| Compte Telegram déconnecté | Session expirée — supprimez les fichiers `client.session*` et reconnectez-vous |
 
 ---
 
