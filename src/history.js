@@ -10,7 +10,7 @@ const logger = require('./logger');
 
 const HISTORY_FILE = path.resolve(__dirname, '..', 'history.json');
 
-let processedCodes = new Set();
+let processedCodes = new Map();
 
 function loadHistory() {
   try {
@@ -18,7 +18,12 @@ function loadHistory() {
       const raw  = fs.readFileSync(HISTORY_FILE, 'utf-8');
       const data = JSON.parse(raw);
       if (Array.isArray(data)) {
-        processedCodes = new Set(data);
+        // Migration depuis l'ancien format Array
+        const now = Date.now();
+        processedCodes = new Map(data.map(code => [code, now]));
+        logger.info(`📋 Historique : Migration de ${processedCodes.size} code(s)`);
+      } else if (typeof data === 'object' && data !== null) {
+        processedCodes = new Map(Object.entries(data));
         logger.info(`📋 Historique : ${processedCodes.size} code(s) en mémoire`);
       }
     } else {
@@ -26,14 +31,15 @@ function loadHistory() {
     }
   } catch (err) {
     logger.error(`📋 Erreur historique : ${err.message}`);
-    processedCodes = new Set();
+    processedCodes = new Map();
   }
 }
 
 function saveHistory() {
   const tmpFile = `${HISTORY_FILE}.tmp`;
   try {
-    const data = JSON.stringify([...processedCodes], null, 2);
+    const obj = Object.fromEntries(processedCodes);
+    const data = JSON.stringify(obj, null, 2);
     fs.writeFileSync(tmpFile, data, 'utf-8');
     fs.renameSync(tmpFile, HISTORY_FILE);
   } catch (err) {
@@ -49,14 +55,23 @@ function hasCode(code) {
 }
 
 function addCode(code) {
-  processedCodes.add(code.toUpperCase());
+  processedCodes.set(code.toUpperCase(), Date.now());
   saveHistory();
 }
 
-function resetHistory() {
-  processedCodes = new Set();
-  saveHistory();
-  logger.info('🗑️ Historique réinitialisé');
+function cleanOldCodes(maxAgeMs = 48 * 60 * 60 * 1000) {
+  const now = Date.now();
+  let removed = 0;
+  for (const [code, timestamp] of processedCodes.entries()) {
+    if (now - timestamp > maxAgeMs) {
+      processedCodes.delete(code);
+      removed++;
+    }
+  }
+  if (removed > 0) {
+    saveHistory();
+    logger.info(`🗑️ Historique : ${removed} ancien(s) code(s) supprimé(s)`);
+  }
 }
 
-module.exports = { loadHistory, hasCode, addCode, resetHistory };
+module.exports = { loadHistory, hasCode, addCode, cleanOldCodes };

@@ -14,13 +14,15 @@
 
 'use strict';
 
-const { chromium } = require('playwright');
-const path         = require('path');
-const logger       = require('./logger');
+const { chromium } = require('playwright-extra');
+const stealthPlugin = require('puppeteer-extra-plugin-stealth')();
+chromium.use(stealthPlugin);
+const path = require('path');
+const logger = require('./logger');
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
-const CRYPTOBOX_URL    = 'https://www.binance.com/fr/my/wallet/account/payment/cryptobox';
+const CRYPTOBOX_URL = 'https://www.binance.com/fr/my/wallet/account/payment/cryptobox';
 const BROWSER_DATA_DIR = path.resolve(__dirname, '..', 'browser-data');
 
 // Nombre maximum de tentatives si la page ne charge pas
@@ -91,6 +93,8 @@ const LOGIN_TIMEOUT_MS = parseInt(process.env.BINANCE_LOGIN_TIMEOUT ?? '300000',
 
 /** @type {import('playwright').BrowserContext | null} */
 let browserContext = null;
+/** @type {import('playwright').Page | null} */
+let cryptoboxPage = null;
 
 // ─── Utilitaires ────────────────────────────────────────────────────────────
 
@@ -123,6 +127,7 @@ async function initBrowser() {
   logger.info('🌐 Lancement du navigateur Chromium...');
 
   browserContext = await chromium.launchPersistentContext(BROWSER_DATA_DIR, {
+    // false pour voir le navigateur, true pour ne pas le voir, important de voir le navigateur pour le login binance pour la premiiere fois  etc...
     headless: false,
     viewport: { width: 1280, height: 800 },
     locale: 'fr-FR',
@@ -147,6 +152,7 @@ async function initBrowser() {
   }
 
   await ensureLoggedIn(page);
+  cryptoboxPage = page;
   logger.success('🟢 Navigateur Binance prêt');
 }
 
@@ -196,9 +202,9 @@ async function checkLoginStatus(page) {
 
   // Stratégie 1 : Cookies de session
   try {
-    const cookies     = await page.context().cookies();
+    const cookies = await page.context().cookies();
     const cookieNames = cookies.map((c) => c.name);
-    const found       = SESSION_COOKIES.find((n) => cookieNames.includes(n));
+    const found = SESSION_COOKIES.find((n) => cookieNames.includes(n));
     if (found) return { connected: true, reason: `cookie "${found}"` };
   } catch (_) { /* continuer */ }
 
@@ -246,151 +252,149 @@ async function checkLoginStatus(page) {
 // ─── Réclamation d'un code Cryptobox ────────────────────────────────────────
 
 async function claimCode(code) {
-  if (!browserContext) {
+  if (!browserContext || !cryptoboxPage) {
     logger.error(`❌ Navigateur non initialisé — code ${code} perdu`);
     return;
   }
 
   logger.info(`🚀 Réclamation en cours : ${code}`);
-  await randomDelay(500, 1500);
 
-  let page = null;
   let attempt = 0;
 
   while (attempt < MAX_RETRIES) {
     attempt++;
 
     try {
-      page = await browserContext.newPage();
-
-      // ── Étape 1 : Navigation avec timeout adaptatif ─────────────────────
-      const navTimeout = 30000 + (attempt * 15000); // 30s, 45s, 60s
-      try {
-        await page.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: navTimeout });
-      } catch (navErr) {
-        if (attempt < MAX_RETRIES) {
-          logger.warn(`🔄 Tentative ${attempt}/${MAX_RETRIES} — page lente, retry...`);
-          try { await page.close(); } catch (_) { /* ignore */ }
-          page = null;
-          await new Promise((r) => setTimeout(r, 2000));
-          continue;
-        }
-        throw navErr;
+      // 1. Vérifier si la page a été accidentellement fermée
+      if (cryptoboxPage.isClosed()) {
+        logger.warn('⚠️ La page Cryptobox a été fermée, réouverture...');
+        cryptoboxPage = await browserContext.newPage();
+        await cryptoboxPage.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
       }
 
-      // Vérifier la session
-      const { connected } = await checkLoginStatus(page);
-      if (!connected) {
-        logger.warn('🔑 Session Binance expirée — reconnectez-vous');
-        await ensureLoggedIn(page);
+      // 2. Vérifier qu'on est bien sur la bonne URL
+      if (!cryptoboxPage.url().includes('cryptobox')) {
+        await cryptoboxPage.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      } else {
+        await cryptoboxPage.bringToFront().catch(() => { });
       }
 
-      // ── Étape 2 : Trouver le champ de saisie avec timeout adaptatif ────
-      const inputTimeout = 15000 + (attempt * 10000); // 15s, 25s, 35s
+      // 3. Attendre le champ avec timeout adaptatif
+      const inputTimeout = 5000 + (attempt * 5000);
       try {
-        await page.waitForSelector(SELECTORS.codeInput, { timeout: inputTimeout });
+        await cryptoboxPage.waitForSelector(SELECTORS.codeInput, { state: 'visible', timeout: inputTimeout });
       } catch (inputErr) {
         if (attempt < MAX_RETRIES) {
           logger.warn(`🔄 Tentative ${attempt}/${MAX_RETRIES} — champ introuvable, reload...`);
-          try { await page.close(); } catch (_) { /* ignore */ }
-          page = null;
-          await new Promise((r) => setTimeout(r, 3000));
+          await cryptoboxPage.reload({ waitUntil: 'domcontentloaded' });
           continue;
         }
         throw inputErr;
       }
 
-      // ── Étape 3 : Saisie du code ────────────────────────────────────────
-      await page.click(SELECTORS.codeInput);
-      await page.fill(SELECTORS.codeInput, '');
-      await page.type(SELECTORS.codeInput, code, { delay: 50 });
+      // Fermer d'anciennes modales si présentes (au cas où la précédente a laissé des traces)
+      try {
+        const closeSelectors = [
+          '[data-testid="modal-close"]', 
+          'svg[color="textIconNormal"]', 
+          '.binance-icon-close', 
+          'button:has-text("OK")',
+          'svg.text-PrimaryText.cursor-pointer' // Nouveau sélecteur fourni
+        ];
+        const closeBtn = await findFirstVisible(cryptoboxPage, closeSelectors);
+        if (closeBtn) await closeBtn.click();
+      } catch (_) { }
 
-      // ── Étape 4 : Soumettre ─────────────────────────────────────────────
-      const submitBtn = await findFirstVisible(page, SELECTORS.submitButton);
+      // 4. Saisie ultra rapide du code
+      await cryptoboxPage.click(SELECTORS.codeInput);
+      await cryptoboxPage.fill(SELECTORS.codeInput, '');
+      await cryptoboxPage.type(SELECTORS.codeInput, code, { delay: 10 });
+
+      // 5. Soumettre
+      const submitBtn = await findFirstVisible(cryptoboxPage, SELECTORS.submitButton);
       if (submitBtn) {
         await submitBtn.click();
       } else {
-        await page.keyboard.press('Enter');
+        await cryptoboxPage.keyboard.press('Enter');
       }
 
-      // ── Étape 5 : Modale de confirmation ────────────────────────────────
-      await page.waitForTimeout(2000);
-
-      const confirmBtn = await findFirstVisible(page, SELECTORS.confirmButton);
+      // 6. Modale de confirmation (Ouvrir)
+      await cryptoboxPage.waitForTimeout(500);
+      const confirmBtn = await findFirstVisible(cryptoboxPage, SELECTORS.confirmButton);
       if (confirmBtn) {
         await confirmBtn.click();
-        await page.waitForTimeout(2500);
+        await cryptoboxPage.waitForTimeout(1000);
       } else {
-        // Essayer de trouver le bouton avec waitForSelector
         for (const sel of SELECTORS.confirmButton) {
           try {
-            const btn = await page.waitForSelector(sel, { state: 'visible', timeout: 3000 });
+            const btn = await cryptoboxPage.waitForSelector(sel, { state: 'visible', timeout: 1000 });
             if (btn) {
               await btn.click();
-              await page.waitForTimeout(2500);
+              await cryptoboxPage.waitForTimeout(1000);
               break;
             }
-          } catch (_) { /* continuer */ }
+          } catch (_) { }
         }
       }
 
-      // ── Étape 6 : Lire le résultat ──────────────────────────────────────
-      await page.waitForTimeout(1000);
-      const errorEl = await page.$(SELECTORS.errorMessage);
+      // 7. Résultat
+      await cryptoboxPage.waitForTimeout(500);
+      const errorEl = await cryptoboxPage.$(SELECTORS.errorMessage);
 
-      if (errorEl) {
+      if (errorEl && await errorEl.isVisible()) {
         const errorText = await errorEl.innerText().catch(() => 'Erreur inconnue');
         const cleanError = errorText.trim().substring(0, 100);
         logger.warn(`📭 Code ${code} — ${cleanError}`);
       } else {
         let gain = 'Montant inconnu';
         try {
-          const successEls = await page.$$(SELECTORS.successMessage);
+          const successEls = await cryptoboxPage.$$(SELECTORS.successMessage);
           let text = '';
           for (const el of successEls) {
             text += (await el.innerText().catch(() => '')) + ' ';
           }
           if (!text.trim()) {
-            text = await page.innerText('body').catch(() => '');
+            text = await cryptoboxPage.innerText('body').catch(() => '');
           }
 
           const gainMatches = [...text.matchAll(/([0-9]+[.,]?[0-9]*)\s*([A-Z]{2,10})/g)];
           const valid = gainMatches.filter(
             (m) => !['H', 'UTC', 'PM', 'AM', 'OK', 'ID', 'FR', 'EN'].includes(m[2])
           );
-          if (valid.length > 0) {
-            gain = `${valid[0][1]} ${valid[0][2]}`;
-          }
-        } catch (_) { /* ignore */ }
-
+          if (valid.length > 0) gain = `${valid[0][1]} ${valid[0][2]}`;
+        } catch (_) { }
         logger.success(`💰 GAGNÉ ! Code ${code} → ${gain}`);
       }
 
-      // Succès — on sort de la boucle de retry
+      // On a réussi l'opération, fermer la modale pour le code suivant
+      try {
+        const closeSelectors = [
+          '[data-testid="modal-close"]', 
+          'svg[color="textIconNormal"]', 
+          '.binance-icon-close',
+          'button:has-text("OK")',
+          'svg.text-PrimaryText.cursor-pointer' // Nouveau sélecteur fourni
+        ];
+        const closeBtn = await findFirstVisible(cryptoboxPage, closeSelectors);
+        if (closeBtn) await closeBtn.click();
+      } catch (_) { }
+
+      // Fin heureuse
       break;
 
     } catch (err) {
       logger.error(`❌ Code ${code} — Tentative ${attempt}/${MAX_RETRIES} : ${err.message}`);
-
-      // Screenshot de debug silencieux
-      try {
-        if (page) {
-          const screenshotPath = path.resolve(__dirname, '..', `error_${code}_${Date.now()}.png`);
-          await page.screenshot({ path: screenshotPath, fullPage: false });
-        }
-      } catch (_) { /* ignore */ }
-
-    } finally {
-      // Toujours fermer l'onglet
-      try { if (page) await page.close(); } catch (_) { /* ignore */ }
-      page = null;
+      if (attempt === MAX_RETRIES) {
+        // En cas d'échec total, recharger la page pour préparer le code suivant
+        try { await cryptoboxPage.reload(); } catch (_) { }
+      }
     }
   }
 }
 
 async function closeBrowser() {
   if (browserContext) {
-    await browserContext.close().catch(() => {});
+    await browserContext.close().catch(() => { });
     browserContext = null;
     logger.info('🌐 Navigateur fermé');
   }

@@ -37,8 +37,8 @@ function parseTargetChannels() {
 
 function scheduleDailyReset() {
   cron.schedule('0 0 * * *', () => {
-    history.resetHistory();
-    logger.info('🗑️ Historique des codes réinitialisé (minuit)');
+    history.cleanOldCodes(); // Nettoie les codes de plus de 48h
+    logger.info('🗑️ Cron minuit : vérification de l\'historique terminée');
   });
 }
 
