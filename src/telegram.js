@@ -96,6 +96,21 @@ async function startTelegramClient(targetChannels, onCodeFound) {
 
   const dp = new Dispatcher(tg);
 
+  // ── Gestion des erreurs internes et réseau de mtcute ──────────────────────
+  tg.onError.add((err) => {
+    const msg = err.message || '';
+    if (msg.includes('ECONNRESET') || msg.includes('ENETUNREACH') || err.code === 'ECONNRESET' || err.code === 'ENETUNREACH') {
+      logger.warn(`📡 Problème réseau temporaire (Telegram) : ${msg}`);
+    } else {
+      logger.error(`💥 Erreur interne Telegram : ${msg}`);
+    }
+  });
+
+  dp.onError(async (err, update) => {
+    logger.error(`💥 Erreur dispatcher Telegram : ${err.message}`);
+    return true; // Marquer comme gérée
+  });
+
   logger.info('🔌 Connexion à Telegram avec mtcute...');
   
   await tg.start({

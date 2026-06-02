@@ -128,7 +128,7 @@ async function initBrowser() {
 
   browserContext = await chromium.launchPersistentContext(BROWSER_DATA_DIR, {
     // false pour voir le navigateur, true pour ne pas le voir, important de voir le navigateur pour le login binance pour la premiiere fois  etc...
-    headless: false,
+    headless: true,
     viewport: { width: 1280, height: 800 },
     locale: 'fr-FR',
     timezoneId: 'Europe/Paris',
@@ -295,9 +295,9 @@ async function claimCode(code) {
       // Fermer d'anciennes modales si présentes (au cas où la précédente a laissé des traces)
       try {
         const closeSelectors = [
-          '[data-testid="modal-close"]', 
-          'svg[color="textIconNormal"]', 
-          '.binance-icon-close', 
+          '[data-testid="modal-close"]',
+          'svg[color="textIconNormal"]',
+          '.binance-icon-close',
           'button:has-text("OK")',
           'svg.text-PrimaryText.cursor-pointer' // Nouveau sélecteur fourni
         ];
@@ -369,8 +369,8 @@ async function claimCode(code) {
       // On a réussi l'opération, fermer la modale pour le code suivant
       try {
         const closeSelectors = [
-          '[data-testid="modal-close"]', 
-          'svg[color="textIconNormal"]', 
+          '[data-testid="modal-close"]',
+          'svg[color="textIconNormal"]',
           '.binance-icon-close',
           'button:has-text("OK")',
           'svg.text-PrimaryText.cursor-pointer' // Nouveau sélecteur fourni
