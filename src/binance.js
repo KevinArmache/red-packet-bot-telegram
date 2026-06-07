@@ -139,7 +139,7 @@ async function initBrowser() {
 
   browserContext = await chromium.launchPersistentContext(BROWSER_DATA_DIR, {
     // false pour voir le navigateur, true pour ne pas le voir, important de voir le navigateur pour le login binance pour la premiiere fois  etc...
-    headless: false,
+    headless: true,
     viewport: { width: 1280, height: 800 },
     locale: 'fr-FR',
     timezoneId: 'Europe/Paris',
