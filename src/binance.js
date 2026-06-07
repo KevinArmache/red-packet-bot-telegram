@@ -81,9 +81,20 @@ const SELECTORS = {
     '[role="button"]:has-text("Open")',
   ],
 
-  // Messages de résultat
-  successMessage: '[class*="success"], [class*="amount"], [data-testid*="success"]',
-  errorMessage: '[class*="error"], [class*="Error"], [class*="invalid"], [role="alert"]',
+  // Messages de résultat — sélecteurs de la modale de succès Binance
+  successModal: [
+    '[class*="result"]',
+    '[class*="success"]',
+    '[class*="reward"]',
+    '[class*="amount"]',
+    '[data-testid*="success"]',
+    '[data-testid*="result"]',
+    'div[class*="modal"] [class*="amount"]',
+    'div[class*="modal"] strong',
+    'div[class*="modal"] b',
+  ],
+  // Sélecteurs d'erreur : on les vérifie en dernier
+  errorMessage: '[role="alert"]:visible, [class*="errorMessage"]:visible, [class*="error-message"]:visible, [class*="invalid-tip"]:visible',
 };
 
 const SESSION_COOKIES = ['BNC_FV_KEY', 'bnc-uuid', 'csrftoken', 'logined', 'se_sd'];
@@ -128,7 +139,7 @@ async function initBrowser() {
 
   browserContext = await chromium.launchPersistentContext(BROWSER_DATA_DIR, {
     // false pour voir le navigateur, true pour ne pas le voir, important de voir le navigateur pour le login binance pour la premiiere fois  etc...
-    headless: true,
+    headless: false,
     viewport: { width: 1280, height: 800 },
     locale: 'fr-FR',
     timezoneId: 'Europe/Paris',
@@ -337,33 +348,58 @@ async function claimCode(code) {
         }
       }
 
-      // 7. Résultat
-      await cryptoboxPage.waitForTimeout(500);
-      const errorEl = await cryptoboxPage.$(SELECTORS.errorMessage);
+      // 7. Résultat — attendre que la modale de résultat apparaisse (max 4s)
+      await cryptoboxPage.waitForTimeout(1500);
 
-      if (errorEl && await errorEl.isVisible()) {
-        const errorText = await errorEl.innerText().catch(() => 'Erreur inconnue');
-        const cleanError = errorText.trim().substring(0, 100);
-        logger.warn(`📭 Code ${code} — ${cleanError}`);
-      } else {
-        let gain = 'Montant inconnu';
+      // Tenter d'abord de lire le montant depuis la modale de succès
+      let gain = '';
+      try {
+        for (const sel of SELECTORS.successModal) {
+          const els = await cryptoboxPage.$$(sel);
+          for (const el of els) {
+            if (!await el.isVisible().catch(() => false)) continue;
+            const t = (await el.innerText().catch(() => '')).trim();
+            if (!t) continue;
+            const matches = [...t.matchAll(/([0-9]+[.,]?[0-9]*)\s*([A-Z]{2,10})/g)];
+            const valid = matches.filter(
+              (m) => !['H', 'UTC', 'PM', 'AM', 'OK', 'ID', 'FR', 'EN', 'VIP', 'KYC'].includes(m[2])
+            );
+            if (valid.length > 0) {
+              gain = `${valid[0][1]} ${valid[0][2]}`;
+              break;
+            }
+          }
+          if (gain) break;
+        }
+      } catch (_) { }
+
+      // Si pas trouvé via les sélecteurs ciblés, scanner tout le body
+      if (!gain) {
         try {
-          const successEls = await cryptoboxPage.$$(SELECTORS.successMessage);
-          let text = '';
-          for (const el of successEls) {
-            text += (await el.innerText().catch(() => '')) + ' ';
-          }
-          if (!text.trim()) {
-            text = await cryptoboxPage.innerText('body').catch(() => '');
-          }
-
-          const gainMatches = [...text.matchAll(/([0-9]+[.,]?[0-9]*)\s*([A-Z]{2,10})/g)];
+          const bodyText = await cryptoboxPage.innerText('body').catch(() => '');
+          const gainMatches = [...bodyText.matchAll(/([0-9]+[.,]?[0-9]*)\s*([A-Z]{2,10})/g)];
           const valid = gainMatches.filter(
-            (m) => !['H', 'UTC', 'PM', 'AM', 'OK', 'ID', 'FR', 'EN'].includes(m[2])
+            (m) => !['H', 'UTC', 'PM', 'AM', 'OK', 'ID', 'FR', 'EN', 'VIP', 'KYC'].includes(m[2])
           );
           if (valid.length > 0) gain = `${valid[0][1]} ${valid[0][2]}`;
         } catch (_) { }
-        logger.success(`💰 GAGNÉ ! Code ${code} → ${gain}`);
+      }
+
+      // Vérifier si un vrai message d'erreur est visible
+      let isError = false;
+      let errorText = '';
+      try {
+        const errorEl = await cryptoboxPage.$(SELECTORS.errorMessage);
+        if (errorEl && await errorEl.isVisible().catch(() => false)) {
+          errorText = (await errorEl.innerText().catch(() => '')).trim();
+          if (errorText.length > 0) isError = true;
+        }
+      } catch (_) { }
+
+      if (isError) {
+        logger.warn(`📭 Code ${code} — ${errorText.substring(0, 120)}`);
+      } else {
+        logger.success(`💰 GAGNÉ ! Code ${code} → ${gain || 'montant à vérifier sur Binance'}`);
       }
 
       // On a réussi l'opération, fermer la modale pour le code suivant
