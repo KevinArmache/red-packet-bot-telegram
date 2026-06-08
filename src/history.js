@@ -40,13 +40,22 @@ function saveHistory() {
   try {
     const obj = Object.fromEntries(processedCodes);
     const data = JSON.stringify(obj, null, 2);
-    fs.writeFileSync(tmpFile, data, 'utf-8');
-    fs.renameSync(tmpFile, HISTORY_FILE);
+    
+    try {
+      // Écriture atomique (plus sûre)
+      fs.writeFileSync(tmpFile, data, 'utf-8');
+      fs.renameSync(tmpFile, HISTORY_FILE);
+    } catch (renameErr) {
+      // Fallback : Écriture directe (contourne l'erreur EPERM sous Windows si le fichier est ouvert dans un éditeur)
+      fs.writeFileSync(HISTORY_FILE, data, 'utf-8');
+      
+      // Nettoyage du fichier temp
+      if (fs.existsSync(tmpFile)) {
+        try { fs.unlinkSync(tmpFile); } catch (_) { /* ignore */ }
+      }
+    }
   } catch (err) {
     logger.error(`💾 Sauvegarde échouée : ${err.message}`);
-    if (fs.existsSync(tmpFile)) {
-      try { fs.unlinkSync(tmpFile); } catch (_) { /* ignore */ }
-    }
   }
 }
 

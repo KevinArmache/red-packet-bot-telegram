@@ -21,7 +21,7 @@ const { hasCode, addCode } = require('./history');
 // ─── Configuration ─────────────────────────────────────────────────────────
 // mtcute utilise par défaut un fichier SQLite pour la session.
 const SESSION_FILE = path.resolve(__dirname, '..', 'client.session');
-const MAX_CODES_PER_MINUTE = 10;
+const MAX_CODES_PER_MINUTE = 5;
 const RATE_WINDOW_MS = 60 * 1000;
 const MIN_HANDLER_DELAY_MS = 200;
 const MAX_HANDLER_DELAY_MS = 600;

@@ -107,6 +107,9 @@ let browserContext = null;
 /** @type {import('playwright').Page | null} */
 let cryptoboxPage = null;
 
+// Heure de fin de pause en cas d'alerte anti-ban (0 = pas de pause)
+let pauseUntil = 0;
+
 // ─── Utilitaires ────────────────────────────────────────────────────────────
 
 function randomDelay(minMs = 800, maxMs = 2000) {
@@ -263,6 +266,12 @@ async function checkLoginStatus(page) {
 // ─── Réclamation d'un code Cryptobox ────────────────────────────────────────
 
 async function claimCode(code) {
+  if (Date.now() < pauseUntil) {
+    const remainingMins = Math.ceil((pauseUntil - Date.now()) / 60000);
+    logger.warn(`⏳ Bot en pause de sécurité Anti-Ban. Code ${code} ignoré. Reprise dans ${remainingMins} min.`);
+    return;
+  }
+
   if (!browserContext || !cryptoboxPage) {
     logger.error(`❌ Navigateur non initialisé — code ${code} perdu`);
     return;
@@ -398,6 +407,21 @@ async function claimCode(code) {
 
       if (isError) {
         logger.warn(`📭 Code ${code} — ${errorText.substring(0, 120)}`);
+        
+        // ─── Protection Anti-Ban Binance ─────────────────────────────────────
+        const lowerError = errorText.toLowerCase();
+        if (lowerError.includes('limite') || lowerError.includes('limit') || lowerError.includes('dépassé')) {
+          // Banni par Binance (généralement 5h)
+          pauseUntil = Date.now() + (5 * 60 * 60 * 1000);
+          logger.error(`🚨 ALERTE ANTI-BAN : La limite de Binance a été atteinte.`);
+          logger.warn(`🛑 Le bot se met en pause automatique pour 5 heures.`);
+        } else if (lowerError.includes('tentative') || lowerError.includes('attempt')) {
+          // Avertissement avant ban (Il reste X tentatives) -> On stop préventivement !
+          pauseUntil = Date.now() + (2 * 60 * 60 * 1000);
+          logger.error(`🚨 AVERTISSEMENT ANTI-BAN : Binance signale des tentatives restantes.`);
+          logger.warn(`🛑 Pause de sécurité de 2 heures déclenchée pour réinitialiser le compteur.`);
+        }
+
       } else {
         logger.success(`💰 GAGNÉ ! Code ${code} → ${gain || 'montant à vérifier sur Binance'}`);
       }
