@@ -97,8 +97,22 @@ async function main() {
 
   // 5. Client Telegram — chaque code détecté est envoyé à Playwright
   await startTelegramClient(targetChannels, (code) => {
+    const pending = queue.size;
+    if (pending > 0) {
+      logger.info(`📥 File d'attente : ${pending} code(s) avant ${code}`);
+    }
+
     queue.enqueue(async () => {
-      await claimCode(code);
+      try {
+        const result = await claimCode(code);
+        if (result.remember) {
+          history.addCode(code);
+        } else if (result.status === 'temporary_failure') {
+          logger.warn(`🔁 Code ${code} non mémorisé — échec temporaire, pas de nouvelle tentative automatique`);
+        }
+      } finally {
+        history.clearProcessing(code);
+      }
     });
   });
 

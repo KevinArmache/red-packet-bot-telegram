@@ -11,6 +11,8 @@ const logger = require('./logger');
 const HISTORY_FILE = path.resolve(__dirname, '..', 'history.json');
 
 let processedCodes = new Map();
+/** Codes en cours de réclamation (mémoire uniquement, anti-doublon concurrent). */
+const inFlightCodes = new Set();
 
 function loadHistory() {
   try {
@@ -59,12 +61,28 @@ function saveHistory() {
   }
 }
 
+function normalizeCode(code) {
+  return code.toUpperCase();
+}
+
 function hasCode(code) {
-  return processedCodes.has(code.toUpperCase());
+  return processedCodes.has(normalizeCode(code));
+}
+
+function isProcessing(code) {
+  return inFlightCodes.has(normalizeCode(code));
+}
+
+function markProcessing(code) {
+  inFlightCodes.add(normalizeCode(code));
+}
+
+function clearProcessing(code) {
+  inFlightCodes.delete(normalizeCode(code));
 }
 
 function addCode(code) {
-  processedCodes.set(code.toUpperCase(), Date.now());
+  processedCodes.set(normalizeCode(code), Date.now());
   saveHistory();
 }
 
@@ -83,4 +101,12 @@ function cleanOldCodes(maxAgeMs = 48 * 60 * 60 * 1000) {
   }
 }
 
-module.exports = { loadHistory, hasCode, addCode, cleanOldCodes };
+module.exports = {
+  loadHistory,
+  hasCode,
+  isProcessing,
+  markProcessing,
+  clearProcessing,
+  addCode,
+  cleanOldCodes,
+};

@@ -269,12 +269,12 @@ async function claimCode(code) {
   if (Date.now() < pauseUntil) {
     const remainingMins = Math.ceil((pauseUntil - Date.now()) / 60000);
     logger.warn(`⏳ Bot en pause de sécurité Anti-Ban. Code ${code} ignoré. Reprise dans ${remainingMins} min.`);
-    return;
+    return { remember: false, status: 'paused' };
   }
 
   if (!browserContext || !cryptoboxPage) {
     logger.error(`❌ Navigateur non initialisé — code ${code} perdu`);
-    return;
+    return { remember: false, status: 'browser_unavailable' };
   }
 
   logger.info(`🚀 Réclamation en cours : ${code}`);
@@ -407,24 +407,26 @@ async function claimCode(code) {
 
       if (isError) {
         logger.warn(`📭 Code ${code} — ${errorText.substring(0, 120)}`);
-        
+
         // ─── Protection Anti-Ban Binance ─────────────────────────────────────
         const lowerError = errorText.toLowerCase();
         if (lowerError.includes('limite') || lowerError.includes('limit') || lowerError.includes('dépassé')) {
-          // Banni par Binance (généralement 5h)
           pauseUntil = Date.now() + (5 * 60 * 60 * 1000);
           logger.error(`🚨 ALERTE ANTI-BAN : La limite de Binance a été atteinte.`);
           logger.warn(`🛑 Le bot se met en pause automatique pour 5 heures.`);
-        } else if (lowerError.includes('tentative') || lowerError.includes('attempt')) {
-          // Avertissement avant ban (Il reste X tentatives) -> On stop préventivement !
+          return { remember: false, status: 'rate_limited' };
+        }
+        if (lowerError.includes('tentative') || lowerError.includes('attempt')) {
           pauseUntil = Date.now() + (2 * 60 * 60 * 1000);
           logger.error(`🚨 AVERTISSEMENT ANTI-BAN : Binance signale des tentatives restantes.`);
           logger.warn(`🛑 Pause de sécurité de 2 heures déclenchée pour réinitialiser le compteur.`);
+          return { remember: false, status: 'rate_limited' };
         }
 
-      } else {
-        logger.success(`💰 GAGNÉ ! Code ${code} → ${gain || 'montant à vérifier sur Binance'}`);
+        return { remember: true, status: 'permanent_failure' };
       }
+
+      logger.success(`💰 GAGNÉ ! Code ${code} → ${gain || 'montant à vérifier sur Binance'}`);
 
       // On a réussi l'opération, fermer la modale pour le code suivant
       try {
@@ -440,16 +442,18 @@ async function claimCode(code) {
       } catch (_) { }
 
       // Fin heureuse
-      break;
+      return { remember: true, status: 'success' };
 
     } catch (err) {
       logger.error(`❌ Code ${code} — Tentative ${attempt}/${MAX_RETRIES} : ${err.message}`);
       if (attempt === MAX_RETRIES) {
-        // En cas d'échec total, recharger la page pour préparer le code suivant
         try { await cryptoboxPage.reload(); } catch (_) { }
+        return { remember: false, status: 'temporary_failure' };
       }
     }
   }
+
+  return { remember: false, status: 'temporary_failure' };
 }
 
 async function closeBrowser() {

@@ -16,30 +16,18 @@ const { Dispatcher, filters } = require('@mtcute/dispatcher');
 const inputPrompt = require('input');
 const path = require('path');
 const logger = require('./logger');
-const { hasCode, addCode } = require('./history');
+const { hasCode, isProcessing, markProcessing } = require('./history');
 
 // ─── Configuration ─────────────────────────────────────────────────────────
 // mtcute utilise par défaut un fichier SQLite pour la session.
 const SESSION_FILE = path.resolve(__dirname, '..', 'client.session');
-const MAX_CODES_PER_MINUTE = 5;
-const RATE_WINDOW_MS = 60 * 1000;
 const MIN_HANDLER_DELAY_MS = 200;
 const MAX_HANDLER_DELAY_MS = 600;
 const IS_DEBUG = process.env.DEBUG === 'true';
 
-// ─── Rate limiter ───────────────────────────────────────────────────────────
-const codeTimestamps = [];
-
-function isRateLimitOk() {
-  const now = Date.now();
-  const cutoff = now - RATE_WINDOW_MS;
-  while (codeTimestamps.length && codeTimestamps[0] < cutoff) codeTimestamps.shift();
-  if (codeTimestamps.length >= MAX_CODES_PER_MINUTE) {
-    logger.warn(`🛡️ Rate limit : ${codeTimestamps.length}/${MAX_CODES_PER_MINUTE} codes/min`);
-    return false;
-  }
-  codeTimestamps.push(now);
-  return true;
+/** Normalise les IDs Telegram (number / bigint / string) pour comparaison fiable. */
+function normalizeChatId(id) {
+  return String(id);
 }
 
 // ─── Utilitaires ────────────────────────────────────────────────────────────
@@ -132,18 +120,33 @@ async function startTelegramClient(targetChannels, onCodeFound) {
 
     try {
       const chat = await tg.getChat(ch);
-      resolvedIds.add(chat.id);
-      
+      const chatKey = normalizeChatId(chat.id);
+      resolvedIds.add(chatKey);
+
       const display = chat.username ? `@${chat.username}` : (chat.title || ch);
-      channelMap.set(chat.id, display);
+      channelMap.set(chatKey, display);
       logger.success(`✔️  Canal ajouté : ${display}`);
+
+      // Groupe de discussion lié (certains canaux postent les codes dans le groupe)
+      try {
+        const full = await tg.getFullChat(ch);
+        if (full.linkedChat?.id) {
+          const linkedKey = normalizeChatId(full.linkedChat.id);
+          if (!resolvedIds.has(linkedKey)) {
+            resolvedIds.add(linkedKey);
+            const linkedName = full.linkedChat.title || `discussion:${linkedKey}`;
+            channelMap.set(linkedKey, `${display} (discussion)`);
+            logger.success(`✔️  Groupe lié ajouté : ${linkedName}`);
+          }
+        }
+      } catch (_) { /* pas de groupe lié ou accès refusé */ }
     } catch (err) {
       logger.warn(`⚠️  Canal non résolu : ${ch}. Erreur : ${err.message}`);
       // Mode dégradé : on ajoute l'ID si c'est un numéro
       if (!isNaN(ch) || ch.startsWith('-100')) {
-          const num = Number(ch);
-          resolvedIds.add(num);
-          channelMap.set(num, ch);
+          const linkedKey = normalizeChatId(Number(ch));
+          resolvedIds.add(linkedKey);
+          channelMap.set(linkedKey, ch);
           logger.success(`✔️  Canal ajouté en mode ID brut : ${ch}`);
       }
     }
@@ -155,24 +158,23 @@ async function startTelegramClient(targetChannels, onCodeFound) {
 
   const displayNames = [...new Set(channelMap.values())].join(', ');
   logger.success(`🚀 Écoute active sur ${resolvedIds.size} canaux : ${displayNames}`);
-  logger.info(`🛡️ Rate limit : ${MAX_CODES_PER_MINUTE} codes/min`);
 
   // ── Handler des nouveaux messages ────────────────────────────────────────
   dp.onNewMessage(filters.any, async (msg) => {
     try {
-      const chatId = msg.chat.id;
-      
+      const chatKey = normalizeChatId(msg.chat.id);
+
       if (IS_DEBUG) {
-          logger.debug(`MSG reçu — chatId="${chatId}" titre="${msg.chat.title}" inSet=${resolvedIds.has(chatId)}`);
+          logger.debug(`MSG reçu — chatId="${chatKey}" titre="${msg.chat.title}" inSet=${resolvedIds.has(chatKey)}`);
       }
 
       // Filtrer si ce n'est pas dans nos cibles
-      if (resolvedIds.size > 0 && !resolvedIds.has(chatId)) {
-        return; 
+      if (resolvedIds.size > 0 && !resolvedIds.has(chatKey)) {
+        return;
       }
 
       // ── Constitution du texte complet ──────────────────────────────────
-      let fullText = msg.text || '';
+      let fullText = msg.text || msg.caption || '';
       
       // Ajouter les textes des urls formattées
       if (msg.entities) {
@@ -198,19 +200,17 @@ async function startTelegramClient(targetChannels, onCodeFound) {
       if (!codes.length) return;
 
       // ── Nom du canal pour le log ───────────────────────────────────────
-      const channelName = channelMap.get(chatId) || msg.chat.title || `@${msg.chat.username}` || `ID:${chatId}`;
+      const channelName = channelMap.get(chatKey) || msg.chat.title || `@${msg.chat.username}` || `ID:${chatKey}`;
 
       // ── Micro-délai humain ─────────────────────────────────────────────
       await humanDelay();
 
       // ── Envoi des codes trouvés ────────────────────────────────────────
       for (const code of codes) {
-        // Double vérification anti-race condition
-        if (hasCode(code)) continue;
+        if (hasCode(code) || isProcessing(code)) continue;
 
-        if (!isRateLimitOk()) continue;
+        markProcessing(code);
         logger.success(`🎁 Code trouvé : ${code} — depuis ${channelName}`);
-        addCode(code);
         onCodeFound(code);
       }
 
@@ -225,4 +225,4 @@ async function startTelegramClient(targetChannels, onCodeFound) {
   return tg;
 }
 
-module.exports = { startTelegramClient };
+module.exports = { startTelegramClient };
