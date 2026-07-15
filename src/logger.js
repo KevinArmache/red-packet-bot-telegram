@@ -6,16 +6,16 @@
  * Le niveau DEBUG n'est affiché que si DEBUG=true dans .env
  */
 
-'use strict';
+"use strict";
 
-const IS_DEBUG = process.env.DEBUG === 'true';
+const IS_DEBUG = process.env.DEBUG === "true";
 
 const LEVELS = {
-  info:    '📘 INFO',
-  warn:    '⚠️  WARN',
-  error:   '❌ ERROR',
-  success: '✅ OK',
-  debug:   '🔍 DEBUG',
+  info: "📘 INFO",
+  warn: "⚠️  WARN",
+  error: "❌ ERROR",
+  success: "✅ OK",
+  debug: "🔍 DEBUG",
 };
 
 /**
@@ -30,12 +30,14 @@ function log(level, message) {
 }
 
 const logger = {
-  info:    (msg) => log('info', msg),
-  warn:    (msg) => log('warn', msg),
-  error:   (msg) => log('error', msg),
-  success: (msg) => log('success', msg),
+  info: (msg) => log("info", msg),
+  warn: (msg) => log("warn", msg),
+  error: (msg) => log("error", msg),
+  success: (msg) => log("success", msg),
   // Le niveau debug est silencieux par défaut (activez DEBUG=true dans .env pour le voir)
-  debug:   (msg) => { if (IS_DEBUG) log('debug', msg); },
+  debug: (msg) => {
+    if (IS_DEBUG) log("debug", msg);
+  },
 };
 
 module.exports = logger;
