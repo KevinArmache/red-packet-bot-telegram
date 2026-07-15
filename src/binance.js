@@ -18,12 +18,14 @@ const { chromium } = require('playwright-extra');
 const stealthPlugin = require('puppeteer-extra-plugin-stealth')();
 chromium.use(stealthPlugin);
 const path = require('path');
+const fs = require('fs');
 const logger = require('./logger');
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
 const CRYPTOBOX_URL = 'https://www.binance.com/fr/my/wallet/account/payment/cryptobox';
 const BROWSER_DATA_DIR = path.resolve(__dirname, '..', 'browser-data');
+const COOKIES_PATH = path.resolve(BROWSER_DATA_DIR, 'cookies.json');
 
 // Nombre maximum de tentatives si la page ne charge pas
 const MAX_RETRIES = 3;
@@ -135,6 +137,35 @@ async function findFirstVisible(page, selectors) {
   return null;
 }
 
+async function saveSessionCookies(context) {
+  try {
+    const cookies = await context.cookies();
+    // Transform session cookies into persistent cookies for 30 days so they don't expire
+    const persistentCookies = cookies.map(c => {
+      if (c.expires === -1) {
+        c.expires = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30;
+      }
+      return c;
+    });
+    fs.writeFileSync(COOKIES_PATH, JSON.stringify(persistentCookies, null, 2));
+    logger.info('🍪 Cookies de session sauvegardés localement');
+  } catch (err) {
+    logger.error('❌ Erreur lors de la sauvegarde des cookies : ' + err.message);
+  }
+}
+
+async function loadSessionCookies(context) {
+  try {
+    if (fs.existsSync(COOKIES_PATH)) {
+      const cookies = JSON.parse(fs.readFileSync(COOKIES_PATH, 'utf8'));
+      await context.addCookies(cookies);
+      logger.info('🍪 Cookies de session restaurés');
+    }
+  } catch (err) {
+    logger.error('❌ Erreur lors de la restauration des cookies : ' + err.message);
+  }
+}
+
 // ─── Initialisation du navigateur ───────────────────────────────────────────
 
 async function initBrowser() {
@@ -155,6 +186,8 @@ async function initBrowser() {
       '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
   });
 
+  await loadSessionCookies(browserContext);
+
   const pages = browserContext.pages();
   const page = pages.length > 0 ? pages[0] : await browserContext.newPage();
 
@@ -166,6 +199,10 @@ async function initBrowser() {
   }
 
   await ensureLoggedIn(page);
+  
+  // Sauvegarde des cookies après s'être assuré qu'on est connecté
+  await saveSessionCookies(browserContext);
+  
   cryptoboxPage = page;
   logger.success('🟢 Navigateur Binance prêt');
 }
