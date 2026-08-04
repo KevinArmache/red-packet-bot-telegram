@@ -6,7 +6,8 @@
  * ║                                                                          ║
  * ║  Fonctionnalités :                                                       ║
  * ║  - Navigateur Chromium persistant (session conservée)                    ║
- * ║  - Retry automatique sur timeout (connexion faible)                      ║
+ * ║  - ZÉRO RETRY : un code n'est soumis QU'UNE SEULE FOIS. S'il échoue,     ║
+ * ║    on passe au suivant (protection du compteur anti-fraude Binance).    ║
  * ║  - Fermeture systématique des onglets (anti-fuite mémoire)              ║
  * ║  - Anti-crash : toute erreur est absorbée sans tuer le processus        ║
  * ╚══════════════════════════════════════════════════════════════════════════╝
@@ -27,8 +28,10 @@ const CRYPTOBOX_URL = 'https://www.binance.com/fr/my/wallet/account/payment/cryp
 const BROWSER_DATA_DIR = path.resolve(__dirname, '..', 'browser-data');
 const COOKIES_PATH = path.resolve(BROWSER_DATA_DIR, 'cookies.json');
 
-// Nombre maximum de tentatives si la page ne charge pas
-const MAX_RETRIES = 3;
+// ⛔ AUCUN RETRY SUR UN CODE : un code n'est jamais soumis deux fois.
+// Seule la PRÉPARATION de la page (avant toute saisie) tolère un rechargement,
+// ce qui ne consomme aucune tentative côté Binance.
+const PAGE_READY_TIMEOUT_MS = 10000;
 
 // ─── Sélecteurs Playwright ───────────────────────────────────────────────────
 
@@ -150,7 +153,7 @@ async function saveSessionCookies(context) {
     fs.writeFileSync(COOKIES_PATH, JSON.stringify(persistentCookies, null, 2));
     logger.info('🍪 Cookies de session sauvegardés localement');
   } catch (err) {
-    logger.error('❌ Erreur lors de la sauvegarde des cookies : ' + err.message);
+    logger.error('🍪 Sauvegarde des cookies échouée : ' + err.message);
   }
 }
 
@@ -162,7 +165,7 @@ async function loadSessionCookies(context) {
       logger.info('🍪 Cookies de session restaurés');
     }
   } catch (err) {
-    logger.error('❌ Erreur lors de la restauration des cookies : ' + err.message);
+    logger.error('🍪 Restauration des cookies échouée : ' + err.message);
   }
 }
 
@@ -194,7 +197,7 @@ async function initBrowser() {
   try {
     await page.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
   } catch (err) {
-    logger.warn(`⚠️ Chargement initial lent — retry... (${err.message})`);
+    logger.warn(`🐌 Chargement initial lent — nouvelle tentative... (${err.message})`);
     await page.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   }
 
@@ -310,21 +313,17 @@ async function claimCode(code) {
   }
 
   if (!browserContext || !cryptoboxPage) {
-    logger.error(`❌ Navigateur non initialisé — code ${code} perdu`);
+    logger.error(`🚫 Navigateur non initialisé — code ${code} perdu`);
     return { remember: false, status: 'browser_unavailable' };
   }
 
   logger.info(`🚀 Réclamation en cours : ${code}`);
 
-  let attempt = 0;
-
-  while (attempt < MAX_RETRIES) {
-    attempt++;
-
+  {
     try {
       // 1. Vérifier si la page a été accidentellement fermée
       if (cryptoboxPage.isClosed()) {
-        logger.warn('⚠️ La page Cryptobox a été fermée, réouverture...');
+        logger.warn('📄 La page Cryptobox a été fermée, réouverture...');
         cryptoboxPage = await browserContext.newPage();
         await cryptoboxPage.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
       }
@@ -336,17 +335,27 @@ async function claimCode(code) {
         await cryptoboxPage.bringToFront().catch(() => { });
       }
 
-      // 3. Attendre le champ avec timeout adaptatif
-      const inputTimeout = 5000 + (attempt * 5000);
-      try {
-        await cryptoboxPage.waitForSelector(SELECTORS.codeInput, { state: 'visible', timeout: inputTimeout });
-      } catch (inputErr) {
-        if (attempt < MAX_RETRIES) {
-          logger.warn(`🔄 Tentative ${attempt}/${MAX_RETRIES} — champ introuvable, reload...`);
-          await cryptoboxPage.reload({ waitUntil: 'domcontentloaded' });
-          continue;
-        }
-        throw inputErr;
+      // 3. Attendre le champ de saisie.
+      //    ⚠️ Ceci se produit AVANT toute saisie : un rechargement ici ne
+      //    consomme aucune tentative Binance, ce n'est donc pas un retry
+      //    sur le code. Au-delà, on abandonne le code sans jamais le rejouer.
+      let inputReady = await cryptoboxPage
+        .waitForSelector(SELECTORS.codeInput, { state: 'visible', timeout: PAGE_READY_TIMEOUT_MS })
+        .then(() => true)
+        .catch(() => false);
+
+      if (!inputReady) {
+        logger.warn(`🔄 Page non prête — rechargement (code ${code} pas encore soumis)`);
+        await cryptoboxPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => { });
+        inputReady = await cryptoboxPage
+          .waitForSelector(SELECTORS.codeInput, { state: 'visible', timeout: PAGE_READY_TIMEOUT_MS })
+          .then(() => true)
+          .catch(() => false);
+      }
+
+      if (!inputReady) {
+        logger.warn(`⏭️ Code ${code} abandonné — champ de saisie introuvable (aucun retry)`);
+        return { remember: false, status: 'page_unavailable' };
       }
 
       // Fermer d'anciennes modales si présentes (au cas où la précédente a laissé des traces)
@@ -482,15 +491,13 @@ async function claimCode(code) {
       return { remember: true, status: 'success' };
 
     } catch (err) {
-      logger.error(`❌ Code ${code} — Tentative ${attempt}/${MAX_RETRIES} : ${err.message}`);
-      if (attempt === MAX_RETRIES) {
-        try { await cryptoboxPage.reload(); } catch (_) { }
-        return { remember: false, status: 'temporary_failure' };
-      }
+      // ⛔ Pas de seconde tentative : on remet la page à zéro et on passe au
+      //    code suivant. Rejouer un code brûlerait le compteur anti-fraude.
+      logger.error(`⛔ Code ${code} — abandonné, aucun retry : ${err.message}`);
+      try { await cryptoboxPage.reload(); } catch (_) { }
+      return { remember: false, status: 'temporary_failure' };
     }
   }
-
-  return { remember: false, status: 'temporary_failure' };
 }
 
 async function closeBrowser() {
