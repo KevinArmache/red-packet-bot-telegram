@@ -1,10 +1,17 @@
 # Fichiers générés automatiquement — ne pas versionner
 .env
+android.env
 session.txt
-client.session*
+*.session*
 browser-data/
 history.json*
 *.tmp
+
+# État d'exécution (superviseur Android, alertes, VNC)
+.run/
+.stop
+.alert-chat-id
+.vnc-password
 
 # Screenshots d'erreur Playwright
 error_*.png
@@ -13,6 +20,7 @@ error_*.png
 node_modules/
 
 # Logs
+logs/
 *.log
 npm-debug.log*
 
