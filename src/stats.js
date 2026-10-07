@@ -11,6 +11,8 @@
 
 "use strict";
 
+const os = require("os");
+
 const state = {
   startedAt: Date.now(),
 
@@ -26,7 +28,8 @@ const state = {
   codesClaimed: 0, // Réclamations réellement tentées
   codesWon: 0,
   codesFailed: 0, // Code invalide / expiré / déjà pris
-  codesSkipped: 0, // Non tentés (pause anti-ban, navigateur indisponible)
+  codesSkipped: 0, // Non tentés (pause anti-ban, navigateur indisponible, session Binance)
+  codesDeferred: 0, // Laissés à l'autre appareil (relais PC ⇄ téléphone)
 
   // Latences (ms)
   totalDetectToClaimMs: 0,
@@ -80,8 +83,18 @@ function formatDuration(ms) {
   return parts.join(" ");
 }
 
-/** Instantané formaté prêt à être affiché par `logger.table()`. */
-function snapshot() {
+/** Formate un nombre d'octets en `142 Mo` / `2.1 Go`. */
+function formatBytes(bytes) {
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} Go` : `${Math.round(mb)} Mo`;
+}
+
+/**
+ * Instantané formaté prêt à être affiché par `logger.table()`.
+ * @param {Array<[string, string|number]>} [extraRows] - Lignes ajoutées en fin
+ *   de tableau (ex. : état du relais PC/téléphone).
+ */
+function snapshot(extraRows = []) {
   const uptime = Date.now() - state.startedAt;
   const attempts = state.codesClaimed || 1;
   const avgWait = Math.round(state.totalDetectToClaimMs / attempts);
@@ -99,7 +112,8 @@ function snapshot() {
       ["🚀 Réclamations", state.codesClaimed],
       ["💰 Gains", `${state.codesWon} (${successRate} %)`],
       ["📭 Échecs", state.codesFailed],
-      ["⏭️ Ignorés", `${state.codesSkipped} (pause/navigateur)`],
+      ["⏭️ Ignorés", `${state.codesSkipped} (pause/navigateur/session)`],
+      ...(state.codesDeferred ? [["🤝 Laissés à l'autre appareil", state.codesDeferred]] : []),
       ["🔁 Doublons filtrés", state.codesDuplicate],
       ["⏮️ Avant démarrage", `${state.messagesBacklog} (jamais traités)`],
       ["🕰️ Messages périmés", state.messagesStale],
@@ -107,6 +121,9 @@ function snapshot() {
       ["⌛ Durée réclamation", `${avgClaim} ms en moyenne`],
       ["📥 Pic de file", state.queuePeak],
       ["📡 Déconnexions", state.disconnects],
+      ["🧠 Mémoire du bot", formatBytes(process.memoryUsage().rss)],
+      ["💾 RAM libre", `${formatBytes(os.freemem())} / ${formatBytes(os.totalmem())}`],
+      ...extraRows,
     ],
   };
 }

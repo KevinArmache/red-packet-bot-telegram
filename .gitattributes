@@ -1,0 +1,6 @@
+# Fins de ligne normalisées (LF dans le dépôt)
+* text=auto
+
+# Les scripts Android DOIVENT rester en LF, même extraits sous Windows
+*.sh text eol=lf
+deploy/android/* text eol=lf

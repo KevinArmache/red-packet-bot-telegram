@@ -10,6 +10,10 @@
  * ║    on passe au suivant (protection du compteur anti-fraude Binance).    ║
  * ║  - Fermeture systématique des onglets (anti-fuite mémoire)              ║
  * ║  - Anti-crash : toute erreur est absorbée sans tuer le processus        ║
+ * ║  - Session expirée détectée : aucun code tapé dans le formulaire de     ║
+ * ║    connexion, et la page n'est plus touchée pendant que tu te           ║
+ * ║    reconnectes (VNC sur téléphone)                                       ║
+ * ║  - Chromium fermé ou onglet planté signalés (relance automatique)       ║
  * ╚══════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -17,6 +21,12 @@
 
 const { chromium } = require('playwright-extra');
 const stealthPlugin = require('puppeteer-extra-plugin-stealth')();
+// BROWSER_USER_AGENT=native : on garde l'identité réelle du navigateur. Sans
+// ça, l'évasion « user-agent-override » ferait passer Linux pour Windows sur
+// les onglets ouverts ensuite, en contradiction avec le reste (WebGL, polices).
+if ((process.env.BROWSER_USER_AGENT ?? '').trim().toLowerCase() === 'native') {
+  stealthPlugin.enabledEvasions.delete('user-agent-override');
+}
 chromium.use(stealthPlugin);
 const path = require('path');
 const fs = require('fs');
@@ -32,6 +42,22 @@ const COOKIES_PATH = path.resolve(BROWSER_DATA_DIR, 'cookies.json');
 // Seule la PRÉPARATION de la page (avant toute saisie) tolère un rechargement,
 // ce qui ne consomme aucune tentative côté Binance.
 const PAGE_READY_TIMEOUT_MS = 10000;
+
+// Session expirée : vérification passive (sans navigation) du retour de la
+// connexion, pour ne jamais perturber une reconnexion en cours dans la fenêtre.
+const LOGIN_WATCH_INTERVAL_MS = 20000;
+
+// User-agent historique (Windows). BROWSER_USER_AGENT=native garde celui du
+// Chromium réel : indispensable sur Android/Linux pour ne pas contredire les
+// autres indices du navigateur (plateforme, WebGL…). Toute autre valeur est
+// utilisée telle quelle.
+const DEFAULT_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+  '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+
+// Options Chromium supplémentaires (séparées par des espaces).
+// ⚠️ Jamais de --disable-features : écraserait la liste de Playwright.
+const EXTRA_ARGS = (process.env.CHROMIUM_EXTRA_ARGS ?? '').split(/\s+/).filter(Boolean);
 
 // ─── Sélecteurs Playwright ───────────────────────────────────────────────────
 
@@ -103,7 +129,11 @@ const SELECTORS = {
 };
 
 const SESSION_COOKIES = ['BNC_FV_KEY', 'bnc-uuid', 'csrftoken', 'logined', 'se_sd'];
-const LOGIN_TIMEOUT_MS = parseInt(process.env.BINANCE_LOGIN_TIMEOUT ?? '300000', 10);
+
+// Délai de connexion manuelle — 0 = attendre indéfiniment (téléphone)
+const RAW_LOGIN_TIMEOUT = parseInt(process.env.BINANCE_LOGIN_TIMEOUT ?? '300000', 10);
+const LOGIN_TIMEOUT_MS =
+  Number.isFinite(RAW_LOGIN_TIMEOUT) && RAW_LOGIN_TIMEOUT >= 0 ? RAW_LOGIN_TIMEOUT : 300000;
 
 // ─── État interne ────────────────────────────────────────────────────────────
 
@@ -115,11 +145,45 @@ let cryptoboxPage = null;
 // Heure de fin de pause en cas d'alerte anti-ban (0 = pas de pause)
 let pauseUntil = 0;
 
+// Session Binance expirée en cours de route : aucun code n'est tenté et la
+// page n'est plus touchée tant que la connexion n'est pas revenue.
+let awaitingLogin = false;
+let loginWatchTimer = null;
+let loginCheckRunning = false;
+let appPageSeen = 0;
+
+// Navigateurs fermés volontairement (veille, arrêt) : leur fermeture n'est
+// pas un plantage.
+const closedOnPurpose = new WeakSet();
+// Navigateurs dont la perte a déjà été signalée (un onglet planté PUIS la
+// fermeture de Chromium ne doivent déclencher qu'une seule relance)
+const lossReported = new WeakSet();
+// Onglets plantés (un onglet planté n'est pas « fermé » pour Playwright)
+const crashedPages = new WeakSet();
+
+// Lancement en cours, et numéro de génération : closeBrowser() l'incrémente,
+// ce qui annule un lancement ou une attente de connexion en cours.
+let launching = false;
+let initGen = 0;
+
+/**
+ * Rappels vers l'orchestrateur (index.js) — tous facultatifs.
+ * @type {{
+ *   onLoginRequired?: () => void,
+ *   onLoginRestored?: () => void,
+ *   onUnexpectedClose?: (reason: string) => void,
+ *   onPause?: (until: number) => void,
+ * }}
+ */
+let hooks = {};
+
 // ─── Utilitaires ────────────────────────────────────────────────────────────
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function randomDelay(minMs = 800, maxMs = 2000) {
   const delay = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
-  return new Promise((resolve) => setTimeout(resolve, delay));
+  return sleep(delay);
 }
 
 /**
@@ -169,88 +233,264 @@ async function loadSessionCookies(context) {
   }
 }
 
-// ─── Initialisation du navigateur ───────────────────────────────────────────
-
-async function initBrowser() {
-  logger.info('🌐 Lancement du navigateur Chromium...');
-
-  browserContext = await chromium.launchPersistentContext(BROWSER_DATA_DIR, {
-    // false pour voir le navigateur, true pour ne pas le voir, important de voir le navigateur pour le login binance pour la premiiere fois  etc...
-    headless: false,
-    viewport: { width: 1280, height: 800 },
-    locale: 'fr-FR',
-    timezoneId: 'Europe/Paris',
-    args: [
-      '--no-sandbox',
-      '--disable-blink-features=AutomationControlled',
-    ],
-    userAgent:
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-      '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-  });
-
-  await loadSessionCookies(browserContext);
-
-  const pages = browserContext.pages();
-  const page = pages.length > 0 ? pages[0] : await browserContext.newPage();
-
-  try {
-    await page.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
-  } catch (err) {
-    logger.warn(`🐌 Chargement initial lent — nouvelle tentative... (${err.message})`);
-    await page.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  }
-
-  await ensureLoggedIn(page);
-  
-  // Sauvegarde des cookies après s'être assuré qu'on est connecté
-  await saveSessionCookies(browserContext);
-  
-  cryptoboxPage = page;
-  logger.success('🟢 Navigateur Binance prêt');
+function resolveUserAgent() {
+  const raw = (process.env.BROWSER_USER_AGENT ?? '').trim();
+  if (!raw) return DEFAULT_USER_AGENT;
+  if (raw.toLowerCase() === 'native') return undefined;
+  return raw;
 }
 
-async function ensureLoggedIn(page) {
-  await new Promise((r) => setTimeout(r, 2000));
+/** Où se connecter : fenêtre du PC, ou écran VNC sur le téléphone. */
+function loginWhereHint() {
+  return process.env.BOT_SCREEN === 'vnc'
+    ? '📱 Écran du bot : app AVNC → 127.0.0.1:5901 (mot de passe : « bot vnc »)'
+    : '💻 Dans la fenêtre Chromium ouverte par le bot';
+}
 
-  const { connected, reason } = await checkLoginStatus(page);
-  if (connected) {
-    logger.success(`🔓 Session Binance active — ${reason}`);
+function browserClosedError() {
+  const err = new Error('Navigateur fermé pendant l\'attente de connexion');
+  err.code = 'BROWSER_CLOSED';
+  return err;
+}
+
+// ─── Analyse des URL ────────────────────────────────────────────────────────
+
+function parseUrl(url) {
+  try {
+    return new URL(url);
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Page de connexion Binance (redirection quand la session a expiré) ? */
+function isLoginPage(url) {
+  const u = parseUrl(url);
+  if (!u) return false;
+  return /^accounts\.binance\./i.test(u.hostname) || /\/login(?:\/|$)/i.test(u.pathname);
+}
+
+/**
+ * Sommes-nous VRAIMENT sur la page Cryptobox ? Hôte ET chemin sont vérifiés :
+ * l'adresse de la page de connexion contient elle aussi « cryptobox » (dans
+ * son paramètre return_to).
+ */
+function isOnCryptobox(url) {
+  const u = parseUrl(url);
+  return (
+    Boolean(u) &&
+    /^(www\.)?binance\.com$/i.test(u.hostname) &&
+    u.pathname.includes('/payment/cryptobox')
+  );
+}
+
+/** Page binance.com « connectée » quelconque (ni connexion, ni page vide) ? */
+function isBinanceAppPage(url) {
+  const u = parseUrl(url);
+  return Boolean(u) && /^(www\.)?binance\.com$/i.test(u.hostname) && !isLoginPage(url);
+}
+
+// ─── Initialisation du navigateur ───────────────────────────────────────────
+
+/**
+ * Lance Chromium et attend une session Binance valide.
+ * Peut être rappelée après closeBrowser() : relance après un plantage, ou
+ * téléphone qui sort de veille (mode relais).
+ *
+ * @param {typeof hooks} [newHooks]
+ */
+async function initBrowser(newHooks = {}) {
+  hooks = newHooks;
+  if (browserContext || launching) return;
+
+  const gen = ++initGen;
+  logger.info('🌐 Lancement du navigateur Chromium...');
+
+  let context;
+  launching = true;
+  try {
+    context = await chromium.launchPersistentContext(BROWSER_DATA_DIR, {
+      // false pour voir le navigateur, true pour ne pas le voir, important de voir le navigateur pour le login binance pour la premiiere fois  etc...
+      headless: false,
+      executablePath: process.env.CHROMIUM_PATH || undefined,
+      viewport: { width: 1280, height: 800 },
+      locale: 'fr-FR',
+      timezoneId: 'Europe/Paris',
+      args: [
+        '--no-sandbox',
+        '--disable-blink-features=AutomationControlled',
+        ...EXTRA_ARGS,
+      ],
+      userAgent: resolveUserAgent(),
+      // Le bot gère lui-même Ctrl+C / SIGTERM / SIGHUP : la file d'attente se
+      // termine AVANT la fermeture du navigateur (arrêt propre).
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      handleSIGHUP: false,
+    });
+  } finally {
+    launching = false;
+  }
+
+  // Fermeture demandée pendant le lancement (veille, arrêt) : on abandonne
+  if (gen !== initGen) {
+    closedOnPurpose.add(context);
+    await context.close().catch(() => { });
+    throw browserClosedError();
+  }
+
+  browserContext = context;
+  context.on('close', () => {
+    if (browserContext === context) {
+      browserContext = null;
+      cryptoboxPage = null;
+      awaitingLogin = false;
+      stopLoginWatch();
+    }
+    reportLoss(context, 'Chromium s\'est fermé');
+  });
+
+  try {
+    await loadSessionCookies(context);
+
+    const pages = context.pages();
+    const page = pages.length > 0 ? pages[0] : await context.newPage();
+    watchPage(page);
+    assertCurrent(gen, page);
+
+    try {
+      await page.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    } catch (err) {
+      assertCurrent(gen, page);
+      logger.warn(`🐌 Chargement initial lent — nouvelle tentative... (${err.message})`);
+      await page.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    }
+
+    await ensureLoggedIn(page, gen);
+
+    // Sauvegarde des cookies après s'être assuré qu'on est connecté
+    await saveSessionCookies(context);
+    assertCurrent(gen, page);
+
+    cryptoboxPage = page;
+    logger.success('🟢 Navigateur Binance prêt');
+  } catch (err) {
+    // Échec (réseau, fermeture volontaire pendant l'attente…) : on ne laisse
+    // pas un Chromium à moitié initialisé derrière nous.
+    if (browserContext === context) {
+      closedOnPurpose.add(context);
+      browserContext = null;
+      cryptoboxPage = null;
+      await context.close().catch(() => { });
+    }
+    throw err;
+  }
+}
+
+/**
+ * Le lancement / l'attente en cours est-il toujours d'actualité ?
+ * closeBrowser() (veille, arrêt, relance) et un onglet planté l'annulent.
+ */
+function assertCurrent(gen, page) {
+  if (gen !== initGen || !browserContext || page.isClosed() || crashedPages.has(page)) {
+    throw browserClosedError();
+  }
+}
+
+/** Perte d'un navigateur : signalée UNE seule fois par navigateur. */
+function reportLoss(context, reason) {
+  if (closedOnPurpose.has(context) || lossReported.has(context)) return;
+  lossReported.add(context);
+  hooks.onUnexpectedClose?.(reason, context);
+}
+
+const watchedPages = new WeakSet();
+
+/** Un onglet tué par Android (mémoire) n'est pas « fermé » : on le surveille. */
+function watchPage(page) {
+  if (watchedPages.has(page)) return;
+  watchedPages.add(page);
+  page.on('crash', () => {
+    crashedPages.add(page);
+    if (page === cryptoboxPage) cryptoboxPage = null;
+    const context = page.context();
+    if (closedOnPurpose.has(context)) return;
+    logger.error('💥 L\'onglet Binance a planté (mémoire insuffisante ?)');
+    reportLoss(context, 'l\'onglet Binance a planté');
+  });
+}
+
+/** Ce navigateur est-il toujours celui du bot ? (relance déjà faite sinon) */
+function isCurrentContext(context) {
+  return Boolean(context) && context === browserContext;
+}
+
+async function ensureLoggedIn(page, gen) {
+  await sleep(2000);
+  assertCurrent(gen, page);
+
+  const first = await checkLoginConfirmed(page);
+  if (first.connected) {
+    logger.success(`🔓 Session Binance active — ${first.reason}`);
     return;
   }
 
   logger.warn(
     '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
     '  🔑 Connectez-vous manuellement à Binance dans le navigateur\n' +
-    `  ⏱️ Timeout : ${LOGIN_TIMEOUT_MS / 60000} minutes\n` +
+    `  ${loginWhereHint()}\n` +
+    (LOGIN_TIMEOUT_MS > 0
+      ? `  ⏱️ Timeout : ${Math.round(LOGIN_TIMEOUT_MS / 60000)} minutes\n`
+      : '  ⏱️ Le bot attend ta connexion, sans limite de temps\n') +
     '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
   );
+  hooks.onLoginRequired?.();
 
-  const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+  const deadline = LOGIN_TIMEOUT_MS > 0 ? Date.now() + LOGIN_TIMEOUT_MS : Infinity;
+  let lastReminder = Date.now();
 
   while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 5000));
-    const remaining = Math.ceil((deadline - Date.now()) / 1000);
+    await sleep(5000);
+    assertCurrent(gen, page);
 
     try {
-      const { connected, reason } = await checkLoginStatus(page);
+      const { connected, reason } = await checkLoginConfirmed(page);
+      assertCurrent(gen, page);
       if (connected) {
         logger.success(`🔓 Connexion Binance détectée — ${reason}`);
+        hooks.onLoginRestored?.();
         return;
       }
-      logger.info(`⏳ En attente de connexion... (${remaining}s restantes)`);
-    } catch (_) { /* page en navigation */ }
+    } catch (err) {
+      if (err?.code === 'BROWSER_CLOSED') throw err;
+      /* page en navigation : prochain passage */
+    }
+
+    // Rappel une fois par minute (et non toutes les 5 s) : le bot peut
+    // attendre des heures sur le téléphone sans noyer les logs.
+    if (Date.now() - lastReminder >= 60000) {
+      lastReminder = Date.now();
+      const remaining = Number.isFinite(deadline)
+        ? ` (${Math.ceil((deadline - Date.now()) / 1000)}s restantes)`
+        : '';
+      logger.info(`⏳ En attente de ta connexion Binance...${remaining}`);
+    }
   }
 
   throw new Error('⏰ Timeout — connexion Binance non détectée');
 }
 
 async function checkLoginStatus(page) {
+  // Stratégie -1 : page de connexion = déconnecté (session expirée, redirection)
+  if (isLoginPage(page.url())) {
+    return { connected: false, reason: 'page de connexion Binance' };
+  }
+
   // Stratégie 0 : Champ de saisie Cryptobox visible = connecté
   try {
     const codeEl = await page.$(SELECTORS.codeInput).catch(() => null);
     if (codeEl && await codeEl.isVisible().catch(() => false)) {
-      return { connected: true, reason: 'champ Cryptobox visible' };
+      return { connected: true, reason: 'champ Cryptobox visible', strong: isOnCryptobox(page.url()) };
     }
   } catch (_) { /* continuer */ }
 
@@ -303,9 +543,182 @@ async function checkLoginStatus(page) {
   return { connected: false, reason: 'aucun indicateur trouvé' };
 }
 
+/**
+ * Comme checkLoginStatus, mais une détection « faible » (cookie, URL, bouton
+ * absent…) est reconfirmée 3 s plus tard : Binance redirige parfois vers la
+ * page de connexion côté client, après le chargement.
+ */
+async function checkLoginConfirmed(page) {
+  const status = await checkLoginStatus(page);
+  if (!status.connected || status.strong) return status;
+  await sleep(3000);
+  if (isLoginPage(page.url())) {
+    return { connected: false, reason: 'redirection vers la connexion' };
+  }
+  return status;
+}
+
+// ─── Session expirée en cours de route ──────────────────────────────────────
+
+/** Code refusé car la session Binance a expiré (aucune tentative brûlée). */
+function loginRequired(code) {
+  logger.error(`🔑 Session Binance expirée — code ${code} non soumis`);
+  enterAwaitingLogin();
+  return { remember: false, status: 'logged_out' };
+}
+
+function enterAwaitingLogin() {
+  if (awaitingLogin) return;
+  awaitingLogin = true;
+  appPageSeen = 0;
+  logger.warn(
+    `🔑 Reconnecte-toi à Binance — ${loginWhereHint()}\n` +
+    '    Les codes sont ignorés en attendant (aucune tentative brûlée).'
+  );
+  hooks.onLoginRequired?.();
+  startLoginWatch();
+}
+
+/** Un autre onglet ouvert sur binance.com et connecté (Cryptobox de préférence). */
+function pickLoggedInPage() {
+  const pages = (browserContext?.pages() ?? []).filter(
+    (p) => p !== cryptoboxPage && !p.isClosed() && !crashedPages.has(p) && isBinanceAppPage(p.url())
+  );
+  return pages.find((p) => isOnCryptobox(p.url())) || pages[0] || null;
+}
+
+/** N'importe quel autre onglet utilisable (par exemple celui de la connexion). */
+function pickOpenPage() {
+  return (browserContext?.pages() ?? []).find(
+    (p) => p !== cryptoboxPage && !p.isClosed() && !crashedPages.has(p)
+  ) || null;
+}
+
+function adoptPage(page) {
+  cryptoboxPage = page;
+  watchPage(page);
+  appPageSeen = 0;
+}
+
+function startLoginWatch() {
+  stopLoginWatch();
+  loginWatchTimer = setInterval(() => { void passiveLoginCheck(); }, LOGIN_WATCH_INTERVAL_MS);
+}
+
+function stopLoginWatch() {
+  if (loginWatchTimer) clearInterval(loginWatchTimer);
+  loginWatchTimer = null;
+}
+
+/**
+ * Détecte le retour de la session SANS naviguer tant que tu es sur la page de
+ * connexion : la saisie de ton mot de passe ou du code 2FA n'est jamais effacée.
+ */
+async function passiveLoginCheck() {
+  if (loginCheckRunning || !awaitingLogin || !browserContext) return;
+  loginCheckRunning = true;
+  try {
+    // Onglet principal fermé ou planté (par exemple pendant la connexion via
+    // VNC) : on adopte un autre onglet, sinon on en rouvre un — personne ne
+    // tape dans un onglet fermé.
+    if (!cryptoboxPage || cryptoboxPage.isClosed() || crashedPages.has(cryptoboxPage)) {
+      const replacement = pickLoggedInPage() || pickOpenPage();
+      if (replacement) {
+        adoptPage(replacement);
+      } else {
+        const page = await browserContext.newPage();
+        adoptPage(page);
+        await page.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => { });
+        return; // vérifié au prochain passage
+      }
+    }
+
+    let url = cryptoboxPage.url();
+
+    // Toujours sur la connexion (identifiants, 2FA, captcha) : on ne touche à
+    // rien… sauf si la connexion a été faite dans un AUTRE onglet, qu'on
+    // adopte (l'onglet de connexion abandonné n'est pas touché).
+    if (isLoginPage(url)) {
+      const other = pickLoggedInPage();
+      if (!other) {
+        appPageSeen = 0;
+        return;
+      }
+      adoptPage(other);
+      url = other.url();
+    }
+
+    // Connecté mais arrivé ailleurs (tableau de bord…) : après deux constats
+    // d'affilée, retour à la page Cryptobox
+    if (isBinanceAppPage(url) && !isOnCryptobox(url)) {
+      appPageSeen++;
+      if (appPageSeen >= 2) {
+        appPageSeen = 0;
+        await cryptoboxPage
+          .goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
+          .catch(() => { });
+      }
+      return;
+    }
+
+    if (!isOnCryptobox(url)) return;
+
+    const el = await cryptoboxPage.$(SELECTORS.codeInput).catch(() => null);
+    if (el && await el.isVisible().catch(() => false)) {
+      awaitingLogin = false;
+      stopLoginWatch();
+      logger.success('🔓 Session Binance rétablie — les codes sont de nouveau réclamés');
+      if (browserContext) await saveSessionCookies(browserContext);
+      hooks.onLoginRestored?.();
+    }
+  } catch (_) {
+    /* page en navigation : prochain passage */
+  } finally {
+    loginCheckRunning = false;
+  }
+}
+
+// ─── Pause anti-ban ─────────────────────────────────────────────────────────
+
+/** Déclenche une pause anti-ban locale et prévient l'orchestrateur. */
+function startPause(durationMs) {
+  pauseUntil = Date.now() + durationMs;
+  hooks.onPause?.(pauseUntil);
+}
+
+/**
+ * Applique une pause anti-ban décidée ailleurs (relais : l'autre appareil a
+ * atteint la limite du MÊME compte Binance).
+ * @returns {boolean} true si la pause a été prolongée.
+ */
+function setPauseUntil(until) {
+  if (!(until > pauseUntil)) return false;
+  pauseUntil = until;
+  return true;
+}
+
+/** État courant, pour le relais PC ⇄ téléphone et les logs. */
+function getStatus() {
+  return {
+    launched: Boolean(browserContext) || launching,
+    ready: Boolean(browserContext && cryptoboxPage),
+    awaitingLogin,
+    pauseUntil,
+  };
+}
+
 // ─── Réclamation d'un code Cryptobox ────────────────────────────────────────
 
-async function claimCode(code) {
+/**
+ * @param {string} code
+ * @param {object} [opts]
+ * @param {() => boolean} [opts.canSubmit] Dernier contrôle juste avant de
+ *   taper le code (relais PC ⇄ téléphone : l'autre appareil a peut-être repris
+ *   la main pendant l'attente). false → status 'deferred', rien n'est tapé.
+ * @param {() => void} [opts.onSubmitting] Appelé juste avant la saisie : le
+ *   code est inscrit à l'historique et au registre partagé AVANT d'être tapé.
+ */
+async function claimCode(code, opts = {}) {
   if (Date.now() < pauseUntil) {
     const remainingMins = Math.ceil((pauseUntil - Date.now()) / 60000);
     logger.warn(`⏳ Bot en pause de sécurité Anti-Ban. Code ${code} ignoré. Reprise dans ${remainingMins} min.`);
@@ -313,8 +726,13 @@ async function claimCode(code) {
   }
 
   if (!browserContext || !cryptoboxPage) {
-    logger.error(`🚫 Navigateur non initialisé — code ${code} perdu`);
+    logger.error(`🚫 Navigateur non prêt — code ${code} non tenté`);
     return { remember: false, status: 'browser_unavailable' };
+  }
+
+  if (awaitingLogin) {
+    logger.warn(`🔑 Code ${code} non tenté — session Binance à reconnecter`);
+    return { remember: false, status: 'logged_out' };
   }
 
   logger.info(`🚀 Réclamation en cours : ${code}`);
@@ -325,12 +743,15 @@ async function claimCode(code) {
       if (cryptoboxPage.isClosed()) {
         logger.warn('📄 La page Cryptobox a été fermée, réouverture...');
         cryptoboxPage = await browserContext.newPage();
+        watchPage(cryptoboxPage);
         await cryptoboxPage.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
       }
 
-      // 2. Vérifier qu'on est bien sur la bonne URL
-      if (!cryptoboxPage.url().includes('cryptobox')) {
+      // 2. Vérifier qu'on est bien sur la bonne page (hôte + chemin)
+      if (isLoginPage(cryptoboxPage.url())) return loginRequired(code);
+      if (!isOnCryptobox(cryptoboxPage.url())) {
         await cryptoboxPage.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        if (isLoginPage(cryptoboxPage.url())) return loginRequired(code);
       } else {
         await cryptoboxPage.bringToFront().catch(() => { });
       }
@@ -345,6 +766,7 @@ async function claimCode(code) {
         .catch(() => false);
 
       if (!inputReady) {
+        if (isLoginPage(cryptoboxPage.url())) return loginRequired(code);
         logger.warn(`🔄 Page non prête — rechargement (code ${code} pas encore soumis)`);
         await cryptoboxPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => { });
         inputReady = await cryptoboxPage
@@ -354,7 +776,16 @@ async function claimCode(code) {
       }
 
       if (!inputReady) {
+        if (isLoginPage(cryptoboxPage.url())) return loginRequired(code);
         logger.warn(`⏭️ Code ${code} abandonné — champ de saisie introuvable (aucun retry)`);
+        return { remember: false, status: 'page_unavailable' };
+      }
+
+      // Dernier contrôle juste avant la saisie (redirection côté client possible)
+      if (!isOnCryptobox(cryptoboxPage.url())) {
+        if (isLoginPage(cryptoboxPage.url())) return loginRequired(code);
+        const host = parseUrl(cryptoboxPage.url())?.hostname || 'page inconnue';
+        logger.warn(`⏭️ Code ${code} abandonné — page inattendue (${host}), aucun retry`);
         return { remember: false, status: 'page_unavailable' };
       }
 
@@ -371,7 +802,13 @@ async function claimCode(code) {
         if (closeBtn) await closeBtn.click();
       } catch (_) { }
 
-      // 4. Saisie ultra rapide du code
+      // 4. Dernier contrôle du relais, puis inscription AVANT la saisie
+      if (opts.canSubmit && !opts.canSubmit()) {
+        return { remember: false, status: 'deferred' };
+      }
+      opts.onSubmitting?.();
+
+      // Saisie ultra rapide du code
       await cryptoboxPage.click(SELECTORS.codeInput);
       await cryptoboxPage.fill(SELECTORS.codeInput, '');
       await cryptoboxPage.type(SELECTORS.codeInput, code, { delay: 10 });
@@ -405,6 +842,10 @@ async function claimCode(code) {
 
       // 7. Résultat — attendre que la modale de résultat apparaisse (max 4s)
       await cryptoboxPage.waitForTimeout(1500);
+
+      // Renvoyé vers la connexion après la soumission : la session venait
+      // d'expirer, Binance n'a pas pris le code en compte.
+      if (isLoginPage(cryptoboxPage.url())) return loginRequired(code);
 
       // Tenter d'abord de lire le montant depuis la modale de succès
       let gain = '';
@@ -457,15 +898,15 @@ async function claimCode(code) {
         // ─── Protection Anti-Ban Binance ─────────────────────────────────────
         const lowerError = errorText.toLowerCase();
         if (lowerError.includes('limite') || lowerError.includes('limit') || lowerError.includes('dépassé')) {
-          pauseUntil = Date.now() + (5 * 60 * 60 * 1000);
           logger.error(`🚨 ALERTE ANTI-BAN : La limite de Binance a été atteinte.`);
           logger.warn(`🛑 Le bot se met en pause automatique pour 5 heures.`);
+          startPause(5 * 60 * 60 * 1000);
           return { remember: false, status: 'rate_limited' };
         }
         if (lowerError.includes('tentative') || lowerError.includes('attempt')) {
-          pauseUntil = Date.now() + (2 * 60 * 60 * 1000);
           logger.error(`🚨 AVERTISSEMENT ANTI-BAN : Binance signale des tentatives restantes.`);
           logger.warn(`🛑 Pause de sécurité de 2 heures déclenchée pour réinitialiser le compteur.`);
+          startPause(2 * 60 * 60 * 1000);
           return { remember: false, status: 'rate_limited' };
         }
 
@@ -488,24 +929,44 @@ async function claimCode(code) {
       } catch (_) { }
 
       // Fin heureuse
-      return { remember: true, status: 'success' };
+      return { remember: true, status: 'success', gain };
 
     } catch (err) {
       // ⛔ Pas de seconde tentative : on remet la page à zéro et on passe au
       //    code suivant. Rejouer un code brûlerait le compteur anti-fraude.
       logger.error(`⛔ Code ${code} — abandonné, aucun retry : ${err.message}`);
-      try { await cryptoboxPage.reload(); } catch (_) { }
+      // Pas de rechargement si la session a expiré : une reconnexion en cours
+      // dans la fenêtre ne doit pas être effacée.
+      if (!awaitingLogin && cryptoboxPage && !cryptoboxPage.isClosed()) {
+        try { await cryptoboxPage.reload(); } catch (_) { }
+      }
       return { remember: false, status: 'temporary_failure' };
     }
   }
 }
 
 async function closeBrowser() {
-  if (browserContext) {
-    await browserContext.close().catch(() => { });
-    browserContext = null;
-    logger.info('🌐 Navigateur fermé');
-  }
+  // Annule aussi un lancement ou une attente de connexion en cours
+  initGen++;
+  stopLoginWatch();
+  const context = browserContext;
+  if (!context) return;
+  closedOnPurpose.add(context);
+  browserContext = null;
+  cryptoboxPage = null;
+  awaitingLogin = false;
+  await context.close().catch(() => { });
+  logger.info('🌐 Navigateur fermé');
 }
 
-module.exports = { initBrowser, claimCode, closeBrowser };
+module.exports = {
+  initBrowser,
+  claimCode,
+  closeBrowser,
+  getStatus,
+  setPauseUntil,
+  isCurrentContext,
+  // Exposés pour les tests
+  isLoginPage,
+  isOnCryptobox,
+};

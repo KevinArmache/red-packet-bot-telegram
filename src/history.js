@@ -86,6 +86,24 @@ function addCode(code) {
   saveHistory();
 }
 
+/**
+ * Ajoute plusieurs codes d'un coup (registre de l'autre appareil, relais
+ * PC ⇄ téléphone). Une seule écriture disque.
+ * @returns {number} Nombre de codes nouveaux.
+ */
+function addCodes(codes) {
+  let added = 0;
+  const now = Date.now();
+  for (const code of codes) {
+    const key = normalizeCode(code);
+    if (processedCodes.has(key)) continue;
+    processedCodes.set(key, now);
+    added++;
+  }
+  if (added > 0) saveHistory();
+  return added;
+}
+
 function cleanOldCodes(maxAgeMs = 48 * 60 * 60 * 1000) {
   const now = Date.now();
   let removed = 0;
@@ -108,5 +126,6 @@ module.exports = {
   markProcessing,
   clearProcessing,
   addCode,
+  addCodes,
   cleanOldCodes,
 };

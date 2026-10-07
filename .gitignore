@@ -1,5 +1,8 @@
 # Fichiers générés automatiquement — ne pas versionner
 .env
+.env.*
+!.env.example
+bot.env
 android.env
 session.txt
 *.session*

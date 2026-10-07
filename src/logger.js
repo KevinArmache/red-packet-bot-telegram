@@ -12,7 +12,13 @@
  * Niveaux disponibles : info, warn, error, success, debug
  * Le niveau DEBUG n'est affiché que si DEBUG=true dans .env
  * Les couleurs sont désactivées automatiquement si NO_COLOR est défini
- * ou si la sortie n'est pas un terminal (redirection vers un fichier).
+ * ou si la sortie n'est pas un terminal (redirection vers un fichier),
+ * sauf avec FORCE_COLOR=1 (utilisé sur Android : le fichier de log garde
+ * les couleurs pour que `bot logs` ait le même rendu que la console).
+ *
+ * Horodatage en heure locale courte `[07/10 21:31:05]` : lisible d'un coup
+ * d'œil, y compris sur un écran de téléphone. LOG_WIDTH règle la largeur
+ * minimale des encadrés (64 par défaut, 48 conseillé en portrait).
  */
 
 "use strict";
@@ -103,7 +109,20 @@ const LABEL_WIDTH = Math.max(
 );
 
 // Largeur totale des blocs décoratifs (bordures comprises)
-const LINE_WIDTH = 64;
+const LINE_WIDTH = Math.min(
+  120,
+  Math.max(32, parseInt(process.env.LOG_WIDTH ?? "64", 10) || 64),
+);
+
+/** Horodatage local compact : `07/10 21:31:05`. */
+function timestampNow() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return (
+    `${p(d.getDate())}/${p(d.getMonth() + 1)} ` +
+    `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  );
+}
 
 /**
  * Formate un message de log avec la date/heure courante.
@@ -111,7 +130,7 @@ const LINE_WIDTH = 64;
  * @param {string} message - Message à afficher.
  */
 function log(level, message) {
-  const timestamp = new Date().toISOString();
+  const timestamp = timestampNow();
   const meta = LEVELS[level];
   const label = meta ? meta.label : `[${level.toUpperCase()}]`;
   const color = meta ? meta.color : "";
@@ -208,10 +227,15 @@ function table(title, rows, color = C.cyan) {
 function list(items, perLine = 3, color = C.gray) {
   if (!items.length) return;
   const cellWidth = Math.max(...items.map(displayWidth)) + 3;
+  // Jamais plus large que LINE_WIDTH (écran de téléphone en portrait)
+  const columns = Math.min(
+    perLine,
+    Math.max(1, Math.floor((LINE_WIDTH - 5) / cellWidth)),
+  );
 
-  for (let i = 0; i < items.length; i += perLine) {
+  for (let i = 0; i < items.length; i += columns) {
     const cells = items
-      .slice(i, i + perLine)
+      .slice(i, i + columns)
       .map((item) => padTo(item, cellWidth));
     console.log(paint(color, "   • ") + cells.join("").trimEnd());
   }
