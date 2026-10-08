@@ -655,6 +655,17 @@ Certaines marques ajoutent leur propre « nettoyeur ». Cherche ces réglages (l
 - **Économie d'énergie** (*Power saving*) : désactive-la, ou exclus les 3 applis.
 - Verrouille Termux dans les applis récentes (8.2).
 
+Exemple détaillé : **Tecno Camon 40 (HiOS 15, Android 15)**. Les noms peuvent varier un peu selon la mise à jour : si tu ne trouves pas, utilise la **loupe 🔍 des Paramètres** avec le mot entre parenthèses.
+
+1. **Batterie** : Paramètres → Applications → Termux → **Utilisation de la batterie par l'appli** → active **« Autoriser l'utilisation en arrière-plan »** → **Sans restriction**. Pareil pour Termux:API et Termux:Boot. (« batterie »)
+2. **Internet en arrière-plan** : Paramètres → Applications → Termux → **Utilisation des données** → **Données en arrière-plan** activé et **Utilisation des données sans restriction** activé. (« données »)
+3. **Économiseur de données** : Paramètres → Réseau mobile → **Économiseur de données** → désactivé. (« économiseur »)
+4. **Démarrage automatique** : Paramètres → Applications → **Démarrage automatique** (ou Phone Master → Démarrage auto) → Termux, Termux:Boot, Termux:API activés. (« démarrage »)
+5. **Nettoyage à l'écran verrouillé** : dans **Phone Master** (ou Paramètres → Batterie), désactive « Nettoyage à l'écran verrouillé » / « Fermer les applis à l'écran verrouillé », ou mets Termux en liste blanche. C'est souvent lui qui coupe le bot quand l'écran se verrouille. (« verrouillé »)
+6. **Économie d'énergie** : Paramètres → Batterie → désactive **Mode économie d'énergie** et **Power Marathon** / économie d'énergie intelligente.
+7. **Applis récentes** : tire la vignette Termux vers le bas (ou appui long) → **cadenas 🔒**.
+8. **Phantom process killer** : Paramètres → À propos du téléphone → touche 7 fois « Numéro de build », puis Paramètres → Système → **Options pour les développeurs** → **« Désactiver les restrictions des processus enfants »**. (« processus enfants »)
+
 **Samsung** (One UI) :
 
 - Paramètres → **Batterie** (ou Entretien de l'appareil → Batterie) → **Limites d'utilisation en arrière-plan** → **Applications jamais en veille** (*Never sleeping apps*) → ajoute les 3 applis.
