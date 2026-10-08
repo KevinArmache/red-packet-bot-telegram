@@ -165,6 +165,11 @@ fi
 banner "$C_CYAN" "🤖 Bot Red Packet — Installation Android" \
   "Durée : 15 à 30 min · environ 1,5 Go à télécharger"
 
+# Pendant l'installation, Android ne doit pas endormir ni tuer Termux
+termux-wake-lock 2>/dev/null || true
+warn "Garde Termux OUVERT au premier plan, l'écran allumé et le téléphone en charge
+    jusqu'à la fin (15 à 30 min) — sinon Android peut couper l'installation."
+
 step 1 "Vérification du téléphone"
 { [ -n "${PREFIX:-}" ] && [ -d "$PREFIX" ]; } || die "Lance ce script dans l'app Termux"
 arch=$(uname -m)
@@ -179,11 +184,33 @@ fi
 
 step 2 "Paquets Termux"
 export DEBIAN_FRONTEND=noninteractive
-pkg upgrade -y -o Dpkg::Options::=--force-confold ||
-  warn "Mise à jour de Termux incomplète — on continue"
-pkg install -y -o Dpkg::Options::=--force-confold \
-  proot-distro termux-api procps util-linux coreutils curl git nano ||
-  die "Installation des paquets Termux impossible (réseau ?)"
+APT_OPTS=(-y -o Dpkg::Options::=--force-confold)
+
+# Répare une installation interrompue (processus tué par Android, coupure…)
+repair_packages() {
+  dpkg --configure -a 2>/dev/null || true
+  apt-get "${APT_OPTS[@]}" --fix-broken install 2>/dev/null || true
+}
+
+# Installe, et en cas d'échec répare puis réessaie (jusqu'à 3 fois)
+install_packages() {
+  local attempt
+  for attempt in 1 2 3; do
+    if pkg install "${APT_OPTS[@]}" "$@"; then return 0; fi
+    warn "Installation interrompue (essai $attempt/3) — réparation puis nouvel essai…"
+    sleep 3
+    repair_packages
+  done
+  return 1
+}
+
+repair_packages
+pkg upgrade "${APT_OPTS[@]}" || { repair_packages; warn "Mise à jour de Termux incomplète — on continue"; }
+install_packages proot-distro termux-api procps util-linux coreutils curl git nano ||
+  die "Installation des paquets Termux impossible. Si tu vois « killed by signal » :
+    garde Termux OUVERT au premier plan, écran allumé et téléphone en charge,
+    ferme les autres applis, puis relance la même commande (elle reprend).
+    Si ça recommence : GUIDE-ANDROID.md, étape 8 (phantom process killer)."
 ok "Paquets Termux installés"
 
 # Les droits d'exécution posés ici ne doivent pas bloquer « bot update »
