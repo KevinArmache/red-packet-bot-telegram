@@ -26,17 +26,41 @@ mkdir -p /bot/logs /bot/.run
 
 node_major() { node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0; }
 
+# Répare une installation interrompue (processus tué par Android)
+repair_packages() {
+  dpkg --configure -a 2>/dev/null || true
+  "${APT[@]}" --fix-broken install 2>/dev/null || true
+}
+
+# retry COMMANDE… : 3 essais ; entre deux essais, réparation des paquets.
+# Android (phantom process killer, mémoire) peut tuer une étape longue.
+retry() {
+  local attempt
+  for attempt in 1 2 3; do
+    "$@" && return 0
+    warn "Étape interrompue (essai $attempt/3) — réparation puis nouvel essai…"
+    sleep 3
+    repair_packages
+  done
+  return 1
+}
+
+KILLED_HINT="Si tu vois « Killed » : Android coupe l'installation. Fais d'abord
+    l'étape 8.5 du guide (phantom process killer), garde Termux au premier
+    plan, écran allumé, ferme les autres applis, puis relance l'installation."
+
 # ─── Paquets Debian ─────────────────────────────────────────────────────────
 
 if [ "$UPDATE_ONLY" -eq 0 ]; then
+  repair_packages
   info "📦 Mise à jour de Debian…"
-  apt-get update || die "apt-get update a échoué (réseau ?)"
-  "${APT[@]}" upgrade || warn "Mise à jour partielle de Debian — on continue"
+  retry apt-get update || die "apt-get update a échoué (réseau ?)"
+  retry "${APT[@]}" upgrade || warn "Mise à jour partielle de Debian — on continue"
 
   info "📦 Outils de base et écran virtuel (VNC)…"
-  "${APT[@]}" install ca-certificates curl gnupg git procps psmisc util-linux \
+  retry "${APT[@]}" install ca-certificates curl gnupg git procps psmisc util-linux \
     tzdata xfonts-base tigervnc-standalone-server ||
-    die "Installation des outils de base impossible"
+    die "Installation des outils de base impossible. $KILLED_HINT"
   # vncpasswd est dans un paquet séparé selon les versions de Debian
   "${APT[@]}" install tigervnc-tools >/dev/null 2>&1 || true
   command -v vncpasswd >/dev/null || die "vncpasswd introuvable (paquet tigervnc-tools)"
@@ -48,10 +72,10 @@ if [ "$UPDATE_ONLY" -eq 0 ]; then
     info "🟩 Installation de Node.js 24 (NodeSource)…"
     if curl -fsSL https://deb.nodesource.com/setup_24.x -o /tmp/nodesource_setup.sh &&
       bash /tmp/nodesource_setup.sh; then
-      "${APT[@]}" install nodejs || die "Installation de Node.js impossible"
+      retry "${APT[@]}" install nodejs || die "Installation de Node.js impossible. $KILLED_HINT"
     else
       warn "NodeSource indisponible — Node.js de Debian à la place"
-      "${APT[@]}" install nodejs npm || die "Installation de Node.js impossible"
+      retry "${APT[@]}" install nodejs npm || die "Installation de Node.js impossible. $KILLED_HINT"
     fi
   fi
 fi
@@ -62,10 +86,11 @@ ok "Node.js $(node -v)"
 # ─── Dépendances du bot ─────────────────────────────────────────────────────
 
 info "📦 Dépendances du bot (npm ci)…"
-if ! npm ci --no-audit --no-fund; then
+if ! retry npm ci --no-audit --no-fund; then
   warn "Compilation nécessaire — installation des outils de compilation"
-  "${APT[@]}" install build-essential python3 || die "Outils de compilation impossibles à installer"
-  npm ci --no-audit --no-fund || die "npm ci a échoué"
+  retry "${APT[@]}" install build-essential python3 ||
+    die "Outils de compilation impossibles à installer. $KILLED_HINT"
+  retry npm ci --no-audit --no-fund || die "npm ci a échoué. $KILLED_HINT"
 fi
 ok "Dépendances installées"
 
@@ -75,12 +100,12 @@ info "🌐 Chromium pour Playwright…"
 PW_FLAGS=(--no-shell chromium)
 [ "$UPDATE_ONLY" -eq 0 ] && PW_FLAGS=(--with-deps "${PW_FLAGS[@]}")
 
-if ./node_modules/.bin/playwright install "${PW_FLAGS[@]}"; then
+if retry ./node_modules/.bin/playwright install "${PW_FLAGS[@]}"; then
   set_env_var "$ANDROID_ENV" CHROMIUM_PATH ""
   ok "Chromium de Playwright installé"
 else
   warn "Chromium de Playwright indisponible — Chromium de Debian à la place"
-  "${APT[@]}" install chromium || die "Installation de Chromium impossible"
+  retry "${APT[@]}" install chromium || die "Installation de Chromium impossible. $KILLED_HINT"
   set_env_var "$ANDROID_ENV" CHROMIUM_PATH /usr/bin/chromium
   ok "Chromium de Debian installé (CHROMIUM_PATH=/usr/bin/chromium)"
 fi
