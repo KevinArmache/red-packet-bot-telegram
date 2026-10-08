@@ -20,6 +20,9 @@
 
 "use strict";
 
+// Avertissement « CommonJS bundles are deprecated » de mtcute : sans intérêt
+// pour l'utilisateur, il polluait chaque démarrage dans les logs
+globalThis._MTCUTE_CJS_DEPRECATION_WARNED = true;
 const { TelegramClient, NodePlatform } = require("@mtcute/node");
 const { Dispatcher, filters } = require("@mtcute/dispatcher");
 const inputPrompt = require("input");
@@ -352,6 +355,10 @@ function createClient({ ownSignals = false } = {}) {
     apiId,
     apiHash,
     storage: SESSION_FILE,
+    // Journal interne de mtcute : erreurs seulement (ses avertissements de
+    // reconnexion, avec traces de pile, sont résumés par nos propres logs 📡).
+    // DEBUG=true les réaffiche.
+    logLevel: IS_DEBUG ? 3 : 1,
     ...(ownSignals ? { platform: new ExitOnlyPlatform() } : {}),
     updates: {
       // ⛔ Pas de rattrapage de l'historique au démarrage : le bot repart de
@@ -445,16 +452,15 @@ async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
   let backlogStreak = 0;
 
   // ── Gestion des erreurs internes et réseau de mtcute ──────────────────────
+  // Coupures réseau : mtcute se reconnecte seul, et la ligne
+  // « 📡 Connexion Telegram perdue — reconnexion automatique... » le dit
+  // déjà. Le détail technique n'apparaît qu'avec DEBUG=true.
+  const NETWORK_ERROR =
+    /ECONNRESET|ECONNABORTED|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|ETIMEDOUT|EPIPE|EAI_AGAIN|ENOTFOUND|socket hang up|timed? ?out/i;
   tg.onError.add((err) => {
     const msg = err.message || "";
-    if (
-      msg.includes("ECONNRESET") ||
-      msg.includes("ENETUNREACH") ||
-      msg.includes("ETIMEDOUT") ||
-      err.code === "ECONNRESET" ||
-      err.code === "ENETUNREACH"
-    ) {
-      logger.warn(`📡 Problème réseau temporaire (Telegram) : ${msg}`);
+    if (NETWORK_ERROR.test(msg) || NETWORK_ERROR.test(String(err.code ?? ""))) {
+      logger.debug(`📡 Détail réseau (Telegram) : ${msg}`);
     } else {
       logger.error(`💥 Erreur interne Telegram : ${msg}`);
     }

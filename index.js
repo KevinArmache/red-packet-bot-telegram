@@ -159,7 +159,8 @@ function writeHeartbeat() {
 function startHeartbeat() {
   if (!HEARTBEAT_FILE) return;
   writeHeartbeat();
-  setInterval(writeHeartbeat, 60_000).unref?.();
+  // Toutes les 15 s : « bot status » reflète vite le relais et le navigateur
+  setInterval(writeHeartbeat, 15_000).unref?.();
 }
 
 function startHealthcheck() {
