@@ -412,6 +412,9 @@ Ce téléphone est déjà connecté ? Aucune question : le bot passe directement
 
 ### 7.2 Binance, avec AVNC
 
+> [!TIP]
+> AVNC est pénible sur un petit écran ? Utilise plutôt la méthode **[7.2 bis : connexion depuis le PC](#72-bis-plus-facile--connexion-binance-depuis-le-pc-sans-avnc)**, plus simple.
+
 1. Termux affiche :
 
    ```text
@@ -439,6 +442,63 @@ Ce téléphone est déjà connecté ? Aucune question : le bot passe directement
 5. Prends ton temps : le bot attend **sans limite**. Il vérifie toutes les 5 s et affiche « ⏳ En attente de ta connexion Binance... » chaque minute.
 6. Dès que c'est bon, Termux affiche « 🔓 Connexion Binance détectée », « 🍪 Cookies de session sauvegardés localement », puis « 🟢 Navigateur Binance prêt ».
 7. Reviens dans Termux. AVNC se déconnecte ensuite : c'est normal, l'écran se ferme à la fin de la connexion.
+
+### 7.2 bis Plus facile : connexion Binance depuis le PC (sans AVNC)
+
+Te connecter à Binance avec AVNC sur un petit écran est pénible ? Connecte-toi **sur le PC** (souris, clavier), puis copie la session sur le téléphone.
+
+**Sur le PC**
+
+1. Ouvre un terminal dans le dossier du bot (`C:\Users\…\red-packet-bot-telegram`) et tape :
+
+   ```bash
+   node index.js --setup
+   ```
+
+2. Tape le code Telegram s'il est demandé. Une fenêtre Chromium s'ouvre : **connecte-toi à Binance** (e-mail, mot de passe, 2FA). Le bot sauvegarde la session puis s'arrête tout seul (« ✅ Connexions OK »).
+3. La session est dans le fichier **`browser-data\cookies.json`** du dossier du bot.
+4. Envoie ce fichier dans tes **« Messages enregistrés »** Telegram (glisse-le dans Telegram Desktop).
+
+**Sur le téléphone**
+
+5. Dans Telegram → **Messages enregistrés** → touche le fichier pour le télécharger → **⋮ → « Enregistrer dans les téléchargements »**. Il arrive dans `Download/Telegram`.
+6. Dans Termux, vérifie qu'il est là :
+
+   ```bash
+   ls /sdcard/Download/Telegram/
+   ```
+
+   « Permission denied » ? Tape `termux-setup-storage`, autorise l'accès aux fichiers, puis recommence.
+7. Mets-le en place, une ligne à la fois (si le fichier s'appelle `cookies (1).json`, adapte le nom en gardant les guillemets) :
+
+   ```bash
+   mkdir -p ~/red-packet-bot-telegram/browser-data
+   cp "/sdcard/Download/Telegram/cookies.json" ~/red-packet-bot-telegram/browser-data/cookies.json
+   bot restart
+   ```
+
+   Pas encore fait `bot login` sur ce téléphone ? Lance plutôt `bot login` à la place de `bot restart` : après le code Telegram, l'étape Binance passe toute seule.
+8. Vérifie avec `bot logs` : tu dois voir `🍪 Cookies de session restaurés`, puis `🔓 Session Binance active` et `🟢 Navigateur Binance prêt` (Ctrl+C pour quitter les logs, le bot continue).
+
+   ⚠️ Si le bot du **PC** tourne (`npm start`), le téléphone reste en veille et n'ouvre pas Binance : c'est normal. Pour tester le téléphone, arrête le bot du PC.
+
+9. **Fais le ménage** (ce fichier donne accès à ton compte Binance) :
+
+   ```bash
+   rm "/sdcard/Download/Telegram/cookies.json"
+   ```
+
+   Puis **supprime le message** qui contient le fichier dans tes « Messages enregistrés ».
+
+**Si Binance redemande une connexion (alerte 🔑)** — il a peut-être remarqué que la session a changé d'appareil. Fais en sorte que le téléphone se présente comme le PC :
+
+```bash
+echo 'BROWSER_USER_AGENT=' >> ~/red-packet-bot-telegram/android.env
+```
+
+puis refais les étapes 1 à 8.
+
+**Plus tard** : une session Binance dure quelques jours. Quand l'alerte « 🔑 Binance demande une reconnexion » revient, refais simplement cette section.
 
 ### 7.3 Alerte de test et démarrage
 
@@ -1445,6 +1505,8 @@ Le bot tourne, mais sa session Binance a expiré : il faut te reconnecter **dans
 2. AVNC → ton serveur « Bot Red Packet » (pas encore créé ? ➕ → Hôte `127.0.0.1`, Port `5901`, **Nom d'utilisateur vide**, le mot de passe ; voir [7.2](#72-binance-avec-avnc)).
 3. Dans la fenêtre Chromium du bot, connecte-toi à Binance (e-mail, mot de passe, 2FA).
 4. Le bot s'en rend compte tout seul, en 20 s au plus : « 🔓 Session Binance rétablie » dans les logs et l'alerte « ✅ Session Binance rétablie ». Tu peux quitter AVNC : le bot continue.
+
+**Plus simple** : connecte-toi sur le PC et copie la session sur le téléphone, voir [7.2 bis](#72-bis-plus-facile--connexion-binance-depuis-le-pc-sans-avnc).
 
 Tu peux aussi faire `bot login` (connexion complète Telegram + Binance, puis redémarrage du bot).
 
