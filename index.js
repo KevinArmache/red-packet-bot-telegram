@@ -163,6 +163,35 @@ function startHeartbeat() {
   setInterval(writeHeartbeat, 15_000).unref?.();
 }
 
+/**
+ * Détecteur de mise en veille (téléphone) : si Android endort le processeur
+ * (wake lock absent ou ignoré), le bot est figé — plus de messages Telegram,
+ * réclamations très lentes. Un minuteur de 5 s qui se réveille avec un gros
+ * retard le prouve : on le signale clairement au lieu de laisser deviner.
+ */
+function startSleepDetector() {
+  if (!UNATTENDED) return; // le PC qui se met en veille, c'est normal
+  const TICK_MS = 5_000;
+  let last = Date.now();
+  setInterval(() => {
+    const now = Date.now();
+    const lateMs = now - last - TICK_MS;
+    last = now;
+    if (lateMs < 15_000) return;
+    stats.bump("deviceSleeps");
+    logger.warn(
+      `💤 Android a endormi le bot pendant ${stats.formatDuration(lateMs)} — wake lock inactif\n` +
+        "    ou ignoré : vérifie « wake lock held » dans la notification Termux\n" +
+        "    et les réglages batterie (GUIDE-ANDROID.md, étape 8.1 bis).",
+    );
+    notifier.notify(
+      "💤 Android endort le bot quand l'écran est verrouillé : aucun code n'arrive pendant ce temps. " +
+        "Vérifie que la notification Termux affiche « wake lock held » et fais l'étape 8.1 bis du guide.",
+      { key: "device-sleep", cooldownMs: 6 * HOUR },
+    );
+  }, TICK_MS).unref?.();
+}
+
 function startHealthcheck() {
   if (!HEALTHCHECK_URL) return;
   const ping = () => {
@@ -685,6 +714,7 @@ async function main() {
   validateEnv();
   setupGlobalErrorHandlers();
   startHeartbeat();
+  startSleepDetector();
   logger.info(`🤝 Rôle : ${relay.describeRole()}`);
   logger.info(`🔔 Alertes : ${notifier.describe()}`);
 

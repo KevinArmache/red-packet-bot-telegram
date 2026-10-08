@@ -41,6 +41,7 @@ const state = {
 
   // Réseau
   disconnects: 0,
+  deviceSleeps: 0, // Fois où Android a endormi le bot (téléphone)
 
   lastCodeAt: 0,
   lastWinAt: 0,
@@ -121,6 +122,7 @@ function snapshot(extraRows = []) {
       ["⌛ Durée réclamation", `${avgClaim} ms en moyenne`],
       ["📥 Pic de file", state.queuePeak],
       ["📡 Déconnexions", state.disconnects],
+      ...(state.deviceSleeps ? [["💤 Bot endormi par Android", `${state.deviceSleeps} fois`]] : []),
       ["🧠 Mémoire du bot", formatBytes(process.memoryUsage().rss)],
       ["💾 RAM libre", `${formatBytes(os.freemem())} / ${formatBytes(os.totalmem())}`],
       ...extraRows,

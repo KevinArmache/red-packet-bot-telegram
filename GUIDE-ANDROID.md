@@ -566,6 +566,11 @@ bot logs
 
 Pendant ces 5 minutes, il ne doit plus y avoir de ligne « 📡 Connexion Telegram perdue ». S'il en reste, refais les points 1 à 7 (le 3 et le 7 sont les plus souvent oubliés).
 
+Le bot t'aide à trouver la cause :
+
+- « 💤 **Android a endormi le bot pendant …** » (dans les logs, et une alerte Telegram) : le processeur du téléphone s'endort, donc le **wake lock ne marche pas**. Vérifie le point 1 (« wake lock held ») et le point 2, puis les réglages de ta marque (8.6), en particulier le **nettoyage à l'écran verrouillé**.
+- Seulement des « 📡 Connexion Telegram perdue », **sans** 💤 : c'est le **réseau** (box, opérateur, Wi-Fi en veille) qui coupe. Le bot envoie un signal à Telegram toutes les 15 s pour garder la connexion ouverte, et se reconnecte tout seul en moins de 30 s. Si c'est très fréquent, essaie l'autre réseau (Wi-Fi ↔ données mobiles) et le point 5.
+
 ### 8.2 Verrouille Termux dans les applis récentes
 
 Ouvre les applis récentes. Appui long sur Termux (ou sur son icône, en haut de la vignette) → **Verrouiller** (cadenas 🔒). Ainsi, « Tout fermer » ne le touche pas.

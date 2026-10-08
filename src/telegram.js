@@ -43,6 +43,10 @@ const UNATTENDED = ["1", "true"].includes(
   String(process.env.BOT_UNATTENDED ?? "").toLowerCase(),
 );
 
+// Intervalle des pings Telegram (secondes, entre 10 et 60)
+const TELEGRAM_PING_MS =
+  Math.min(60, Math.max(10, parseInt(process.env.TELEGRAM_PING_S ?? "15", 10) || 15)) * 1000;
+
 // ⛔ AUCUN RATTRAPAGE : seuls les messages publiés APRÈS le démarrage du bot
 // sont analysés. Tout l'historique antérieur est ignoré, quoi qu'il arrive.
 // Rempli au moment où l'écoute démarre réellement.
@@ -359,6 +363,10 @@ function createClient({ ownSignals = false } = {}) {
     // reconnexion, avec traces de pile, sont résumés par nos propres logs 📡).
     // DEBUG=true les réaffiche.
     logLevel: IS_DEBUG ? 3 : 1,
+    // Ping toutes les 15 s (60 s par défaut) : garde la connexion ouverte à
+    // travers les box et réseaux mobiles qui ferment en silence une connexion
+    // inactive, et détecte une connexion morte en < 30 s au lieu de 2 min.
+    network: { pingInterval: TELEGRAM_PING_MS },
     ...(ownSignals ? { platform: new ExitOnlyPlatform() } : {}),
     updates: {
       // ⛔ Pas de rattrapage de l'historique au démarrage : le bot repart de
