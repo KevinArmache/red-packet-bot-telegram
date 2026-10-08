@@ -426,13 +426,16 @@ Ce téléphone est déjà connecté ? Aucune question : le bot passe directement
 
 2. Ouvre **AVNC** → bouton **➕** (nouveau serveur) :
    - Nom : `Bot Red Packet` (au choix) ;
-   - Hôte (*Host*) : `127.0.0.1` ;
+   - Hôte (*Host* ou *Adresse*) : `127.0.0.1` ;
    - Port : `5901` ;
-   - Mot de passe : celui affiché par Termux.
+   - **Nom d'utilisateur : laisse VIDE** (cette connexion n'a pas de nom d'utilisateur) ;
+   - Mot de passe : celui affiché par Termux. Tu l'as oublié ? Tape `bot vnc` dans Termux (majuscules et minuscules comptent).
 
    Laisse le reste par défaut. Enregistre, puis touche ce serveur pour te connecter. La prochaine fois, il sera déjà dans la liste.
+
+   « Connexion refusée » ? L'écran n'existe que pendant que le bot tourne (ou pendant `bot login`) : vérifie avec `bot status`, et lance `bot start` si besoin.
 3. Tu vois l'**écran du bot** (1280×1024), avec Chromium ouvert sur Binance. Tourne le téléphone **en paysage** et **zoome** avec deux doigts.
-4. Connecte-toi comme d'habitude : e-mail (ou téléphone), mot de passe, puis la vérification (2FA, puzzle…). Si Binance te propose un QR code, choisis plutôt la connexion par mot de passe.
+4. Connecte-toi comme d'habitude : e-mail (ou téléphone), mot de passe, puis la vérification (2FA, puzzle…). Le clavier n'apparaît pas quand tu touches un champ ? Ouvre la barre d'outils d'AVNC (sur le bord de l'écran) et touche l'icône **clavier**. Pour lire le code 2FA, passe dans ton appli SMS, e-mail ou d'authentification, puis reviens dans AVNC. Si Binance te propose un QR code, choisis plutôt la connexion par mot de passe.
 5. Prends ton temps : le bot attend **sans limite**. Il vérifie toutes les 5 s et affiche « ⏳ En attente de ta connexion Binance... » chaque minute.
 6. Dès que c'est bon, Termux affiche « 🔓 Connexion Binance détectée », « 🍪 Cookies de session sauvegardés localement », puis « 🟢 Navigateur Binance prêt ».
 7. Reviens dans Termux. AVNC se déconnecte ensuite : c'est normal, l'écran se ferme à la fin de la connexion.
@@ -1436,7 +1439,14 @@ La session Telegram du téléphone n'est plus valide. Lance `bot login` (ou le w
 
 ### « 🔑 Binance demande une reconnexion »
 
-Ouvre AVNC (`bot vnc` te redonne le mot de passe) et reconnecte-toi dans Chromium. Le bot s'en rend compte tout seul, en 20 s au plus : « 🔓 Session Binance rétablie » (ou « 🔓 Connexion Binance détectée » si Chromium venait de démarrer). Tu peux aussi faire `bot login`.
+Le bot tourne, mais sa session Binance a expiré : il faut te reconnecter **dans son écran**, avec AVNC.
+
+1. Dans Termux : `bot vnc` → note le mot de passe.
+2. AVNC → ton serveur « Bot Red Packet » (pas encore créé ? ➕ → Hôte `127.0.0.1`, Port `5901`, **Nom d'utilisateur vide**, le mot de passe ; voir [7.2](#72-binance-avec-avnc)).
+3. Dans la fenêtre Chromium du bot, connecte-toi à Binance (e-mail, mot de passe, 2FA).
+4. Le bot s'en rend compte tout seul, en 20 s au plus : « 🔓 Session Binance rétablie » dans les logs et l'alerte « ✅ Session Binance rétablie ». Tu peux quitter AVNC : le bot continue.
+
+Tu peux aussi faire `bot login` (connexion complète Telegram + Binance, puis redémarrage du bot).
 
 ### Après un `bot login` raté, le bot reste arrêté
 
