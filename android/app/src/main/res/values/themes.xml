@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.RedPacketBot" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#B71C1C</item>
+        <item name="android:windowBackground">#FFF8F6</item>
+    </style>
+</resources>

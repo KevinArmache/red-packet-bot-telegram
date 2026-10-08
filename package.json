@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "apk": "node android/scripts/build-apk.mjs",
+    "apk:install": "node android/scripts/build-apk.mjs --install"
   },
   "engines": {
     "node": ">=18.0.0"

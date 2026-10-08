@@ -23,22 +23,33 @@
 // Avertissement « CommonJS bundles are deprecated » de mtcute : sans intérêt
 // pour l'utilisateur, il polluait chaque démarrage dans les logs
 globalThis._MTCUTE_CJS_DEPRECATION_WARNED = true;
-const { TelegramClient, NodePlatform } = require("@mtcute/node");
+const { TelegramClient, NodePlatform, MemoryStorage } = require("@mtcute/node");
 const { Dispatcher, filters } = require("@mtcute/dispatcher");
-const inputPrompt = require("input");
-const path = require("path");
+const fs = require("fs");
 const logger = require("./logger");
+const { hints } = require("./platform");
+const { dataPath } = require("./paths");
 const stats = require("./stats");
 const { hasCode, isProcessing, markProcessing } = require("./history");
 
 // ─── Configuration ─────────────────────────────────────────────────────────
 // mtcute utilise par défaut un fichier SQLite pour la session.
-const SESSION_FILE = path.resolve(__dirname, "..", "client.session");
+const SESSION_FILE = dataPath("client.session");
 const IS_DEBUG = process.env.DEBUG === "true";
 
-// Bot lancé sans personne devant l'écran (superviseur Android) : il ne doit
-// JAMAIS demander de code Telegram. Une session invalide devient une erreur
-// TG_LOGIN_REQUIRED (« lance bot login ») au lieu d'un prompt bloquant.
+// App Android : pas de module SQLite natif dans Node.js mobile. La session
+// est gardée en mémoire et sauvegardée en texte (export mtcute) dans le
+// stockage privé de l'app. TG_SESSION_STORAGE=string est posé par l'app.
+const STRING_SESSION = process.env.TG_SESSION_STORAGE === "string";
+const STRING_SESSION_FILE = dataPath("telegram-session.txt");
+
+// App Android : connexion demandée depuis l'app (bouton « Connexion
+// Telegram ») — le code et le mot de passe 2FA sont saisis dans l'app.
+const LOGIN_VIA_APP = process.env.BOT_TG_LOGIN === "1" && Boolean(globalThis.__rpbHost);
+
+// Bot lancé sans personne devant l'écran (app Android, PM2, systemd) : il ne
+// doit JAMAIS demander de code Telegram. Une session invalide devient une
+// erreur TG_LOGIN_REQUIRED (connexion à refaire) au lieu d'un prompt bloquant.
 const UNATTENDED = ["1", "true"].includes(
   String(process.env.BOT_UNATTENDED ?? "").toLowerCase(),
 );
@@ -335,7 +346,7 @@ function isAuthDeadError(err) {
 
 function loginRequiredError() {
   const err = new Error(
-    "Session Telegram absente ou expirée — lance « bot login » pour te reconnecter",
+    `Session Telegram absente ou expirée — ${hints.telegramLogin}`,
   );
   err.code = "TG_LOGIN_REQUIRED";
   return err;
@@ -344,7 +355,7 @@ function loginRequiredError() {
 /**
  * @param {{ ownSignals?: boolean }} [opts]
  *   ownSignals : le bot gère lui-même les signaux (arrêt propre) — pas en
- *   mode « bot login », qui n'a pas de gestionnaire à lui.
+ *   mode connexion (--setup), qui n'a pas de gestionnaire à lui.
  */
 function createClient({ ownSignals = false } = {}) {
   const apiId = parseInt(process.env.API_ID, 10);
@@ -358,7 +369,7 @@ function createClient({ ownSignals = false } = {}) {
   return new TelegramClient({
     apiId,
     apiHash,
-    storage: SESSION_FILE,
+    storage: STRING_SESSION ? new MemoryStorage() : SESSION_FILE,
     // Journal interne de mtcute : erreurs seulement (ses avertissements de
     // reconnexion, avec traces de pile, sont résumés par nos propres logs 📡).
     // DEBUG=true les réaffiche.
@@ -388,6 +399,8 @@ function createClient({ ownSignals = false } = {}) {
  * mtcute les appelle AVANT d'envoyer le moindre code : aucun SMS en boucle.
  */
 async function authenticate(tg, { interactive }) {
+  const session = readStringSession();
+
   if (!interactive) {
     const need = () => {
       throw loginRequiredError();
@@ -395,25 +408,102 @@ async function authenticate(tg, { interactive }) {
     // Ceinture et bretelles : toute future invite de mtcute échoue aussi
     tg.input = () => Promise.reject(loginRequiredError());
     try {
-      await tg.start({ phone: need, code: need, password: need });
-      return;
+      await tg.start({ session, phone: need, code: need, password: need });
     } catch (err) {
       if (err?.code === "TG_LOGIN_REQUIRED") throw err;
       if (isAuthDeadError(err)) throw loginRequiredError();
       throw err;
     }
+    await saveStringSession(tg);
+    return;
   }
 
   const phone = process.env.PHONE_NUMBER;
+  const ask = loginPrompter();
   await tg.start({
+    session,
     phone: () => phone,
-    code: async () => await inputPrompt.text("📱 Code Telegram : "),
-    password: async () => await inputPrompt.text("🔐 Mot de passe 2FA : "),
+    code: () => ask.code(),
+    password: () => ask.password(),
+    codeSentCallback: (sent) => ask.codeSent(sent),
+    invalidCodeCallback: (type) => ask.invalid(type),
   });
+  await saveStringSession(tg);
 }
 
 /**
- * Connexion seule, pour `node index.js --setup` (commande « bot login ») :
+ * Où saisir le code Telegram : dans l'app Android (connexion demandée depuis
+ * l'app), sinon au clavier, dans le terminal.
+ */
+function loginPrompter() {
+  if (LOGIN_VIA_APP) {
+    const host = globalThis.__rpbHost;
+    return {
+      code: () => host.ask("telegram_code"),
+      password: () => host.ask("telegram_password"),
+      codeSent: (sent) => {
+        assertCodeDeliverable(sent);
+        logger.info(`📨 Code Telegram envoyé (${sent.type}) — saisis-le dans l'app`);
+        host.event("telegram_code_sent", { via: sent.type });
+      },
+      invalid: (kind) => {
+        logger.warn(kind === "code" ? "❌ Code Telegram incorrect" : "❌ Mot de passe 2FA incorrect");
+        host.event("telegram_invalid", { kind });
+      },
+    };
+  }
+  const inputPrompt = require("input");
+  return {
+    code: () => inputPrompt.text("📱 Code Telegram : "),
+    password: () => inputPrompt.text("🔐 Mot de passe 2FA : "),
+    codeSent: (sent) => {
+      assertCodeDeliverable(sent);
+      logger.info("📨 Code Telegram envoyé — regarde ton app Telegram (ou tes SMS)");
+    },
+    invalid: (kind) =>
+      logger.warn(kind === "code" ? "❌ Code incorrect — réessaie" : "❌ Mot de passe incorrect — réessaie"),
+  };
+}
+
+/**
+ * Telegram exige parfois une adresse e-mail de connexion avant d'envoyer le
+ * code : aucun code n'arrivera, on le dit clairement (comme mtcute le fait
+ * quand aucun rappel n'est fourni).
+ */
+function assertCodeDeliverable(sent) {
+  if (sent?.type === "email_required") {
+    throw new Error(
+      "Telegram exige une adresse e-mail de connexion pour ce compte : configure-la " +
+        "dans l'app Telegram officielle (Réglages → Confidentialité), puis réessaie",
+    );
+  }
+}
+
+/** Session texte de l'app Android (undefined ailleurs, ou si absente). */
+function readStringSession() {
+  if (!STRING_SESSION) return undefined;
+  try {
+    return fs.readFileSync(STRING_SESSION_FILE, "utf-8").trim() || undefined;
+  } catch (_) {
+    return undefined;
+  }
+}
+
+/** Sauvegarde la session (app Android) : écriture atomique, fichier privé. */
+async function saveStringSession(tg) {
+  if (!STRING_SESSION) return;
+  try {
+    const session = await tg.exportSession();
+    const tmp = `${STRING_SESSION_FILE}.tmp`;
+    fs.writeFileSync(tmp, session, { mode: 0o600 });
+    fs.renameSync(tmp, STRING_SESSION_FILE);
+  } catch (err) {
+    logger.warn(`💾 Sauvegarde de la session Telegram impossible : ${err.message}`);
+  }
+}
+
+/**
+ * Connexion seule, pour `node index.js --setup` :
  * code au clavier si besoin, puis on rend la main.
  * @returns {Promise<{ tg: TelegramClient, me: import('@mtcute/node').User }>}
  */
@@ -662,10 +752,15 @@ async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
   // ── Connexion ────────────────────────────────────────────────────────────
   logger.info("🔌 Connexion à Telegram avec mtcute...");
 
-  await authenticate(tg, { interactive: !UNATTENDED });
+  await authenticate(tg, { interactive: !UNATTENDED || LOGIN_VIA_APP });
 
   const me = await tg.getMe();
   logger.success(`👤 Connecté : ${me.displayName} (@${me.username || "N/A"})`);
+  // App Android : l'écran « Connexion Telegram » affiche le compte connecté
+  globalThis.__rpbHost?.event("telegram_ok", {
+    name: me.displayName,
+    username: me.username || "",
+  });
 
   // Relais PC ⇄ téléphone : démarré AVANT la résolution des canaux (qui peut
   // durer plusieurs minutes avec FLOOD_WAIT) pour réduire au minimum la
@@ -856,11 +951,7 @@ async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
     })();
   }
 
-  logger.info(
-    UNATTENDED
-      ? "⏹️  Arrêt : widget ⏹️ ou commande « bot stop »"
-      : "⌨️  Ctrl+C pour arrêter",
-  );
+  logger.info(UNATTENDED ? `⏹️  Arrêt : ${hints.stop}` : "⌨️  Ctrl+C pour arrêter");
 
   return { tg, me };
 }

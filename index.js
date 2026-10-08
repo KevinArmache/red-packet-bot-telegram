@@ -7,8 +7,8 @@
  *  • Téléphone (BOT_ROLE=backup) :
  *      .env → historique → Telegram → relais → navigateur Binance
  *      UNIQUEMENT quand le PC est absent (Chromium fermé en veille)
- *  • `node index.js --setup` (commande « bot login » sur le téléphone) :
- *      connexion Telegram puis connexion Binance, et sortie
+ *  • `node index.js --setup` :
+ *      connexion Telegram puis connexion Binance, alerte de test, et sortie
  */
 
 "use strict";
@@ -26,6 +26,7 @@ const history = require("./src/history");
 const queue = require("./src/queue");
 const notifier = require("./src/notifier");
 const relay = require("./src/relay");
+const { hints, ANDROID_APP } = require("./src/platform");
 const binance = require("./src/binance");
 const { startTelegramClient, loginTelegram, isAuthDeadError } = require("./src/telegram");
 
@@ -40,7 +41,7 @@ const STATS_INTERVAL_MIN = Math.max(
   parseInt(process.env.STATS_INTERVAL_MIN ?? "30", 10),
 );
 
-// Signe de vie pour le watchdog Android (fichier réécrit chaque minute)
+// Signe de vie pour l'app Android (fichier réécrit toutes les 15 s)
 const HEARTBEAT_FILE = (process.env.BOT_HEARTBEAT_FILE ?? "").trim();
 // Facultatif : ping healthchecks.io toutes les 5 min (alerte si le téléphone meurt)
 const HEALTHCHECK_URL = (process.env.HEALTHCHECK_URL ?? "").trim();
@@ -120,16 +121,18 @@ function scheduleDailyReset() {
 // ─── Signe de vie (watchdog Android) et healthcheck ─────────────────────────
 
 /**
- * Le bot est « vivant » pour le watchdog et healthchecks.io seulement si
- * Telegram répond : une session révoquée ne doit pas passer pour un bot en
- * bonne santé.
+ * Telegram répond-il ? Le ping healthchecks.io n'est envoyé que dans ce cas
+ * (une session révoquée ne doit pas passer pour un bot en bonne santé), et
+ * le signe de vie le signale à l'app (tg_ok).
  */
 function telegramAlive() {
   return !telegram || Date.now() - telegramHealthyAt < TELEGRAM_PROBE_MS * 2 + 60_000;
 }
 
 function writeHeartbeat() {
-  if (!HEARTBEAT_FILE || !telegramAlive()) return;
+  // Toujours écrit : c'est la preuve que le processus vit (watchdog de l'app).
+  // La santé de Telegram est un champ à part (tg_ok), avec son propre seuil.
+  if (!HEARTBEAT_FILE) return;
   const s = binance.getStatus();
   const browser = s.awaitingLogin
     ? "login"
@@ -148,6 +151,11 @@ function writeHeartbeat() {
     `won=${stats.state.codesWon}`,
     `last_code_at=${stats.state.lastCodeAt}`,
     `started_at=${stats.state.startedAt}`,
+    `sleeps=${stats.state.deviceSleeps}`,
+    `disconnects=${stats.state.disconnects}`,
+    `messages=${stats.state.messagesSeen}`,
+    `tg_ok=${telegramAlive() ? 1 : 0}`,
+    `tg_healthy_at=${telegramHealthyAt}`,
   ];
   try {
     fs.writeFileSync(HEARTBEAT_FILE, `${lines.join("\n")}\n`);
@@ -159,13 +167,13 @@ function writeHeartbeat() {
 function startHeartbeat() {
   if (!HEARTBEAT_FILE) return;
   writeHeartbeat();
-  // Toutes les 15 s : « bot status » reflète vite le relais et le navigateur
+  // Toutes les 15 s : l'état affiché par l'app reflète vite le relais et le navigateur
   setInterval(writeHeartbeat, 15_000).unref?.();
 }
 
 /**
  * Détecteur de mise en veille (téléphone) : si Android endort le processeur
- * (wake lock absent ou ignoré), le bot est figé — plus de messages Telegram,
+ * (réglages batterie, nettoyage de la marque), le bot est figé — plus de messages Telegram,
  * réclamations très lentes. Un minuteur de 5 s qui se réveille avec un gros
  * retard le prouve : on le signale clairement au lieu de laisser deviner.
  */
@@ -180,13 +188,12 @@ function startSleepDetector() {
     if (lateMs < 15_000) return;
     stats.bump("deviceSleeps");
     logger.warn(
-      `💤 Android a endormi le bot pendant ${stats.formatDuration(lateMs)} — wake lock inactif\n` +
-        "    ou ignoré : vérifie « wake lock held » dans la notification Termux\n" +
-        "    et les réglages batterie (GUIDE-ANDROID.md, étape 8.1 bis).",
+      `💤 Le système a endormi le bot pendant ${stats.formatDuration(lateMs)} — vérifie\n` +
+        `    ${hints.sleepSettings}.`,
     );
     notifier.notify(
-      "💤 Android endort le bot quand l'écran est verrouillé : aucun code n'arrive pendant ce temps. " +
-        "Vérifie que la notification Termux affiche « wake lock held » et fais l'étape 8.1 bis du guide.",
+      "💤 Le téléphone endort le bot quand l'écran est verrouillé : aucun code n'arrive pendant ce temps. " +
+        `Vérifie ${hints.sleepSettings}.`,
       { key: "device-sleep", cooldownMs: 6 * HOUR },
     );
   }, TICK_MS).unref?.();
@@ -247,11 +254,11 @@ async function loginRequiredExit(reason) {
   shuttingDown = true;
   logger.error(
     `🔑 Session Telegram invalide (${reason}) — ` +
-      (UNATTENDED ? "lance « bot login » pour te reconnecter" : "relance le bot et saisis le code"),
+      (UNATTENDED ? hints.telegramLogin : "relance le bot et saisis le code"),
   );
   await notifier.sendAndWait(
     UNATTENDED
-      ? "🔑 Session Telegram expirée : ouvre Termux et lance « bot login » (ou le widget 🔑 Connexion)."
+      ? `🔑 Session Telegram expirée : ${hints.telegramLogin}.`
       : "🔑 Session Telegram expirée : relance le bot (npm start) et saisis le code reçu.",
     { key: "tg-login", cooldownMs: 3 * HOUR },
   );
@@ -263,12 +270,10 @@ async function loginRequiredExit(reason) {
 // ─── Navigateur : rappels, relance, veille ──────────────────────────────────
 
 function binanceLoginMessage() {
-  return process.env.BOT_SCREEN === "vnc"
-    ? "🔑 Binance demande une reconnexion. Ouvre AVNC → 127.0.0.1:5901 " +
-        "(mot de passe : « bot vnc » dans Termux) et connecte-toi. " +
-        "Les codes sont ignorés en attendant."
-    : "🔑 Binance demande une reconnexion : connecte-toi dans la fenêtre " +
-        "Chromium du bot. Les codes sont ignorés en attendant.";
+  return (
+    `🔑 Binance demande une reconnexion : ${hints.binanceLogin}. ` +
+    "Les codes sont ignorés en attendant."
+  );
 }
 
 const browserHooks = {
@@ -416,6 +421,8 @@ function onRelayStandby() {
 async function fatal(reason, exitCode = 1) {
   if (shuttingDown) return;
   shuttingDown = true;
+  // App Android : la cause s'affiche aussi à l'écran
+  globalThis.__rpbHost?.event("fatal", { message: reason });
   logger.error(
     `💀 ${reason} — arrêt du bot` +
       (UNATTENDED ? " (le superviseur va le relancer)" : ""),
@@ -634,7 +641,7 @@ function setupGlobalErrorHandlers() {
   process.on("SIGHUP", () => gracefulShutdown("SIGHUP"));
 }
 
-// ─── Mode connexion (« bot login ») ─────────────────────────────────────────
+// ─── Mode connexion (« node index.js --setup ») ─────────────────────────────
 
 async function runSetup() {
   logger.blank();
@@ -672,7 +679,7 @@ async function runSetup() {
 
   logger.blank();
   logger.banner(
-    ["✅ Connexions OK", "Lance le bot : widget ▶️ ou « bot start »"],
+    ["✅ Connexions OK", "Lance le bot : npm start"],
     logger.colors.green,
   );
   process.exit(0);
@@ -715,6 +722,9 @@ async function main() {
   setupGlobalErrorHandlers();
   startHeartbeat();
   startSleepDetector();
+  if (ANDROID_APP && process.env.BOT_APP_VERSION) {
+    logger.info(`📱 App Android : version ${process.env.BOT_APP_VERSION}`);
+  }
   logger.info(`🤝 Rôle : ${relay.describeRole()}`);
   logger.info(`🔔 Alertes : ${notifier.describe()}`);
 
@@ -730,7 +740,10 @@ async function main() {
 
   // 4. Navigateur Binance — PC / appareil seul : tout de suite, comme avant.
   //    Téléphone : seulement quand il prend le relais (voir onRelayActivate).
-  if (relay.ROLE !== "backup") {
+  //    App Android seule (solo) : après Telegram, pour que la connexion
+  //    Telegram (faite dans l'app) n'attende pas la connexion Binance.
+  const browserFirst = relay.ROLE !== "backup" && !ANDROID_APP;
+  if (browserFirst) {
     await binance.initBrowser(browserHooks);
   }
   logger.info(`🎯 ${targetChannels.length} canal(aux) demandé(s) dans TARGET_CHANNELS`);
@@ -744,6 +757,9 @@ async function main() {
     onConnectionState: (state) => relay.setConnectionState(state),
     onAuthenticated: async (client, me) => {
       telegram = client;
+      // Connecté : Telegram est sain dès maintenant (la résolution des canaux
+      // peut durer plusieurs minutes avant la première vérification)
+      telegramHealthyAt = Date.now();
       notifier.setChatId(me.id);
       if (relay.ROLE !== "solo") {
         logger.blank();
@@ -769,6 +785,7 @@ async function main() {
   });
   telegram = tg;
   startTelegramProbe();
+  if (relay.ROLE !== "backup" && !browserFirst) onRelayActivate();
 
   // 6. Cron reset + bilan périodique + healthcheck
   scheduleDailyReset();
@@ -795,16 +812,16 @@ async function main() {
 main().catch(async (err) => {
   if (err?.code === "TG_LOGIN_REQUIRED") {
     logger.error(`🔑 ${err.message}`);
-    await notifier.sendAndWait(
-      "🔑 Session Telegram expirée : ouvre Termux et lance « bot login » " +
-        "(ou le widget 🔑 Connexion).",
-      { key: "tg-login", cooldownMs: 3 * HOUR },
-    );
+    await notifier.sendAndWait(`🔑 Session Telegram expirée : ${hints.telegramLogin}.`, {
+      key: "tg-login",
+      cooldownMs: 3 * HOUR,
+    });
     process.exit(EXIT_LOGIN_REQUIRED);
   }
 
   logger.error(`💀 Erreur fatale : ${err.message}`);
   logger.error(err.stack ?? "");
+  globalThis.__rpbHost?.event("fatal", { message: err.message });
   await notifier.sendAndWait(
     `💥 Erreur fatale : ${err.message}` +
       (UNATTENDED ? " — relance automatique." : ""),

@@ -7,8 +7,9 @@
 const fs     = require('fs');
 const path   = require('path');
 const logger = require('./logger');
+const { dataPath } = require('./paths');
 
-const HISTORY_FILE = path.resolve(__dirname, '..', 'history.json');
+const HISTORY_FILE = dataPath('history.json');
 
 let processedCodes = new Map();
 /** Codes en cours de réclamation (mémoire uniquement, anti-doublon concurrent). */

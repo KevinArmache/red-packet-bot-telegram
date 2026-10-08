@@ -1,6 +1,10 @@
 # Fins de ligne normalisées (LF dans le dépôt)
 * text=auto
 
-# Les scripts Android DOIVENT rester en LF, même extraits sous Windows
-*.sh text eol=lf
-deploy/android/* text eol=lf
+# Script Gradle pour Linux/macOS en LF, script Windows en CRLF
+android/gradlew text eol=lf
+*.bat text eol=crlf
+
+# Fichiers binaires
+*.jar binary
+*.png binary

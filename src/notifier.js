@@ -26,6 +26,7 @@
 const fs = require("fs");
 const path = require("path");
 const logger = require("./logger");
+const { dataPath } = require("./paths");
 
 const TOKEN = (process.env.ALERT_BOT_TOKEN ?? "").trim();
 const LEVEL = normalizeLevel(process.env.NOTIFY_LEVEL);
@@ -36,9 +37,8 @@ const LABEL =
   (process.env.BOT_NAME ?? "").trim() ||
   (ROLE === "backup" ? "📱 Téléphone" : "💻 PC");
 
-const ROOT_DIR = path.resolve(__dirname, "..");
-const CHAT_ID_FILE = path.join(ROOT_DIR, ".alert-chat-id");
-const STATE_FILE = path.join(ROOT_DIR, ".run", "alerts.json");
+const CHAT_ID_FILE = dataPath(".alert-chat-id");
+const STATE_FILE = dataPath(".run", "alerts.json");
 const SEND_TIMEOUT_MS = 8000;
 
 function normalizeLevel(raw) {

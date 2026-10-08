@@ -9,7 +9,7 @@
 - 🎯 **Zéro raté** — texte, légendes, **boutons inline**, **liens masqués**, blocs `monospace`, aperçus de lien et **messages édités** : tout est analysé.
 
 > [!IMPORTANT]
-> 📱 **Le bot 24 h/24 sur ton téléphone Android ?** Suis le guide pas à pas : **[GUIDE-ANDROID.md](GUIDE-ANDROID.md)**.
+> 📱 **Le bot 24 h/24 sur ton téléphone Android ?** Installe l'app, avec le guide pas à pas : **[GUIDE-ANDROID.md](GUIDE-ANDROID.md)**.
 
 ## Sommaire
 
@@ -39,7 +39,7 @@
 - **🛡️ Protections anti-ban** — une seule soumission par code, un code à la fois, anti-doublons 48 h, pauses automatiques de 5 h ou 2 h, navigateur furtif, session Binance expirée détectée sans jamais taper un code au mauvais endroit.
 - **🔔 Alertes qui sonnent vraiment** — via ton propre bot Telegram (@BotFather) : gains, reconnexions à faire, pauses, plantages, bilan quotidien.
 - **🤝 Relais PC ⇄ téléphone** — le PC a la priorité, le téléphone prend le relais dès que le PC s'arrête. Un seul appareil réclame à la fois, pour ne pas soumettre deux fois le même code.
-- **📱 Android 24/7** — installation en 3 commandes dans Termux, widgets sur l'écran d'accueil, relance automatique (plantage, redémarrage du téléphone, watchdog), faible impact sur le téléphone.
+- **📱 App Android 24/7** — une APK fabriquée en une commande (`npm run apk`), réglages et connexions dans l'app (Binance en plein écran), service permanent, relance automatique (plantage, redémarrage du téléphone, mise à jour).
 - **♻️ Robuste** — Chromium relancé tout seul s'il plante, reconnexion Telegram automatique, arrêt propre avec `Ctrl+C`.
 - **📊 Logs lisibles** — heure locale, niveaux alignés et colorés, bilan d'activité périodique.
 
@@ -138,151 +138,51 @@ Ensuite, le bot affiche `🟢 Bot opérationnel — En attente des Red Packets`.
 ## 📱 Android 24/7
 
 > [!TIP]
-> 📖 **Le guide complet est ici : [GUIDE-ANDROID.md](GUIDE-ANDROID.md)** — applis, bot d'alertes, installation, connexion, réglages Android, logs, dépannage. Cette section n'en est qu'un résumé.
+> 📖 **Le guide complet est ici : [GUIDE-ANDROID.md](GUIDE-ANDROID.md)** — fabriquer l'APK, l'installer, les connexions, les réglages du téléphone (Tecno / HiOS), le dépannage. Cette section n'en est qu'un résumé.
 
-Le bot tourne aussi sur un téléphone Android, 24 h/24. Playwright ne démarre pas directement sous Android : le kit `deploy/android/` installe donc un **Debian** (avec `proot-distro`) dans **Termux**, et un **écran virtuel** (Xvnc) pour Chromium. Le code et les sélecteurs sont les mêmes que sur le PC.
+Le bot tourne aussi sur un téléphone Android, 24 h/24, sous forme d'**application** : **Red Packet Bot**. C'est **le même code que sur le PC** : l'APK embarque Node.js (Node.js mobile) et le dossier `src/`. La page Binance tourne dans une **WebView** de l'app, que Playwright pilote comme le Chromium du PC. Rien d'autre à installer, aucune commande à taper sur le téléphone.
 
-### Ce qu'il te faut
+### Fabriquer et installer l'APK
 
-- Un téléphone **64 bits** (`uname -m` affiche `aarch64`), **Android 7 ou plus** (10 ou plus conseillé), **4 Go de RAM** conseillés, **environ 3 Go libres**, un **Wi-Fi stable**.
-- Ces applis, **toutes depuis F-Droid** (les applis Termux doivent toutes venir de la même source) :
-  - **Termux** ;
-  - **Termux:Boot** — ouvre-la une fois après l'installation ;
-  - **Termux:Widget** ;
-  - **Termux:API** — pour le watchdog et les petits messages de confirmation ;
-  - **AVNC** (F-Droid ou Play Store) — pour voir l'écran du bot.
-- ⚠️ **N'utilise pas le Termux du Play Store.**
-
-### Installation en 3 commandes
-
-Dans Termux :
+Sur le PC (Android Studio installé une fois, avec le NDK 27.1 et CMake 3.22.1) :
 
 ```bash
-pkg update -y && pkg install -y git
-git clone https://github.com/KevinArmache/red-packet-bot-telegram ~/red-packet-bot-telegram
-bash ~/red-packet-bot-telegram/deploy/android/install.sh
+npm install
+npm run apk
 ```
 
-Compte 15 à 30 min (environ 1,5 Go à télécharger). L'installation se fait en 7 étapes :
+L'APK arrive dans `dist/RedPacketBot.apk`. Copie-la sur le téléphone (câble USB ou Telegram) et ouvre-la pour l'installer. Avec le débogage USB activé, `npm run apk:install` l'installe directement.
 
-1. Vérification du téléphone (64 bits, environ 3 Go libres).
-2. Paquets Termux.
-3. Debian, avec `proot-distro`.
-4. Logiciels du bot dans Debian : écran virtuel TigerVNC, Node.js 24, `npm ci`, Chromium de Playwright (ou celui de Debian en secours), puis un test de Chromium.
-5. Tes réglages : import de `bot.env` (voir ci-dessous), sinon `nano` s'ouvre sur une copie de `.env.example`. Si Android demande l'accès aux fichiers, accepte. Un `.env` déjà présent sur le téléphone est gardé.
-6. Commande `bot`, démarrage automatique (Termux:Boot), widgets, tâches de fond autorisées (`allow-external-apps`), mot de passe de l'écran VNC, watchdog.
-7. Fin : l'installation te propose de lancer `bot login` tout de suite.
+> [!IMPORTANT]
+> La première compilation crée la **clé de signature** dans `~/.red-packet-bot/`. **Garde-en une copie** : chaque mise à jour de l'app doit être signée avec la même clé, sinon il faut désinstaller l'app (et refaire les connexions).
 
-Installation interrompue (réseau, appel…) ? **Relance la même commande** : elle reprend où elle en était.
+### Dans l'app, la première fois
 
-> [!TIP]
-> **Le même `.env` que sur le PC.** Copie ton `.env` hors du dossier du projet (sur le Bureau, par exemple) et nomme la copie `bot.env`. Envoie-la dans tes **Messages enregistrés** Telegram. Sur le téléphone, touche-la pour la télécharger, puis son menu **⋮** → **« Enregistrer dans les téléchargements »** : elle arrive dans `Download/Telegram`. L'installation la cherche dans `Download/` puis `Download/Telegram/`, l'importe et **la supprime**. Ensuite, **supprime le message** dans tes Messages enregistrés et la copie sur le PC : ce fichier contient tes secrets. Les réglages propres au téléphone (`BOT_ROLE=backup`…) sont posés automatiquement : tu n'as rien à changer.
+1. **Réglages** → importe ton `.env` (partage du fichier `bot.env` depuis Telegram, fichier, ou copier-coller), vérifie, **Enregistrer**. Le rôle reste **secours du PC** (`backup`).
+2. **Connexion Telegram** → **Se connecter** → tape le code reçu dans Telegram (et ton mot de passe 2FA). Le téléphone a sa propre session sur le même compte.
+3. **Connexion Binance** → connecte-toi en plein écran, avec le clavier du téléphone. L'écran se ferme tout seul une fois connecté.
+4. **Santé** → les réglages Android et Tecno pour que le bot ne soit jamais coupé (batterie sans restriction, démarrage auto et applis protégées dans Phone Master…).
+5. **Accueil** → **▶️ Démarrer**, puis **Alerte de test**.
 
-### Se connecter : `bot login`
+### Une fois lancé
 
-S'il tournait, le bot est mis en pause pendant la connexion.
-
-1. Le code Telegram se tape **dans Termux** (seulement s'il est demandé), puis ton mot de passe 2FA Telegram si tu en as un.
-2. La connexion Binance se fait dans le Chromium du bot, affiché sur l'écran virtuel : ouvre **AVNC** → ➕ → adresse **`127.0.0.1`**, port **`5901`**, mot de passe affiché au début de `bot login`, et à tout moment avec **`bot vnc`** (8 caractères, gardé dans `.vnc-password`). L'écran fait 1280×1024.
-3. Le bot attend ta connexion Binance **sans limite de temps**.
-4. À la fin, une **alerte de test** 🔔 est envoyée (si les [alertes](#-alertes-telegram) sont réglées), puis le bot démarre.
-
-Si la connexion échoue, le bot n'est relancé que s'il tournait avant : relance `bot login`.
-
-### Au quotidien
-
-Les commandes, dans Termux :
-
-- `bot start` ▶️ — démarre le bot en arrière-plan (il continue même Termux fermé)
-- `bot stop` ⏹️ — arrêt propre ; il ne redémarre plus tout seul
-- `bot restart` 🔄 — redémarre
-- `bot status` 📊 — tableau de bord
-- `bot logs` 📜 — logs en direct, en couleurs (`bot logs --plain` : sans couleurs). `Ctrl+C` ferme l'affichage, pas le bot
-- `bot login` 🔑 — connexion Telegram puis Binance
-- `bot vnc` 🖥️ — adresse et mot de passe de l'écran du bot (AVNC)
-- `bot update` ⬇️ — met à jour le bot (`git pull`, dépendances, raccourcis), puis le relance s'il tournait
-- `bot watchdog on` / `bot watchdog off` 🛡️ — relance automatique toutes les 15 min
-
-Les widgets (Termux:Widget), sur l'écran d'accueil :
-
-- **1 ▶️ Démarrer le bot** et **2 ⏹️ Arrêter le bot** — s'exécutent en arrière-plan, avec un petit message de confirmation ;
-- **3 📊 État du bot**, **4 📜 Logs du bot**, **5 🔑 Connexion du bot** — ouvrent un terminal.
-
-Exemple de `bot status`, téléphone en veille pendant que le PC tourne :
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  🤖 Bot Red Packet — État
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  ⚙️  Bot          🟢 en marche depuis 3h07m
-  🤝 Relais       😴 relais — en veille (le PC réclame)
-  🌐 Navigateur   😴 fermé (mémoire libérée)
-  🎁 Codes        12 détecté(s) · 0 gagné(s)
-  💓 Signe de vie il y a 24s
-  🧠 Mémoire      bot 96 Mo · Chromium 0 Mo
-  🔥 CPU          1 % (moyenne depuis le lancement)
-  🛡️  Watchdog     activé (vérification toutes les 15 min)
-```
-
-Suivent les 8 dernières lignes du log.
-
-### Une fois lancé, il ne s'arrête jamais
-
-- **Tâche de fond Termux + wake lock.** Le bot n'est lié à aucune fenêtre : fermer Termux, ou le retirer des applis récentes, ne l'arrête pas. La notification Termux indique une tâche (« task ») en cours.
-- **Superviseur.** Si le bot s'arrête, il est relancé après 10 s, puis l'attente double à chaque nouvel arrêt, jusqu'à 10 min (retour à 10 s si le bot a tenu 5 min). Code de sortie 78 (connexion Telegram à refaire) : nouvel essai toutes les 30 min, et l'alerte 🔑 te prévient.
-- **Termux:Boot.** Il relance le bot quand le téléphone redémarre.
-- **Watchdog Termux:API**, toutes les 15 min, indépendant de Termux. Il relance le bot si Android a tué Termux, si tu as appuyé sur « Exit » dans la notification Termux, ou si le bot est figé (aucun signe de vie depuis 5 min).
-
-**Seul `bot stop` (ou le widget ⏹️) l'arrête durablement.** Il crée un fichier `.stop`, que le démarrage automatique et le watchdog respectent jusqu'au prochain `bot start` (ou ▶️).
-
-### Léger pour le téléphone
-
-- Le bot tourne en **priorité basse** (`nice 10`) : le téléphone reste fluide.
-- Quand le PC est actif, le téléphone est **en veille** : il laisse les codes au PC et **ferme Chromium après 2 min** (mémoire libérée). Il le rouvre quand il reprend le relais.
-- Toute la sortie va dans `logs/bot.log` : Termux ne garde rien en mémoire, même après des semaines. Le fichier est archivé dans `logs/bot.log.1` quand il atteint 5 Mo.
-
-### Réglages Android indispensables
-
-Sans eux, Android finira par couper le bot. Le détail, marque par marque, est à l'**étape 8 du [guide](GUIDE-ANDROID.md)**.
-
-- Batterie **« Sans restriction »** (ou « Non optimisée ») pour **Termux**, **Termux:API** et **Termux:Boot**.
-- **Verrouille Termux** dans les applis récentes.
-- Laisse le téléphone **en charge**, idéalement avec une limite de charge (par exemple « Protéger la batterie » chez Samsung).
-- N'appuie **jamais** sur **« Exit »** dans la notification Termux.
-- **Phantom process killer** (Android 12 et plus) :
-  - Android 14 et plus : **Options pour les développeurs** → **« Désactiver les restrictions des processus enfants »** (en anglais : *Disable child process restrictions*) ;
-  - Android 12 et 13 : avec ADB (voir ci-dessous).
-- Réglages de la marque : **Tecno / Infinix / itel** (HiOS / XOS : liste blanche du nettoyage automatique de Phone Master, gestion du démarrage automatique, économie d'énergie), **Samsung** (Batterie → Limites d'utilisation en arrière-plan → Applications jamais en veille), **Xiaomi / Redmi / POCO** (démarrage automatique, économiseur de batterie sans restriction, verrouillage dans les récentes). Voir aussi [dontkillmyapp.com](https://dontkillmyapp.com).
-- Facultatif : **[healthchecks.io](https://healthchecks.io)**, pour être prévenu si le téléphone lui-même s'éteint. Crée un check gratuit avec une période de 5 min, mets son adresse de ping dans `HEALTHCHECK_URL` (fichier `android.env`) et active son intégration Telegram.
-
-<details>
-<summary><b>Android 12 / 13 : couper le phantom process killer avec ADB</b></summary>
-
-Depuis un PC qui a ADB, ou depuis le téléphone lui-même :
-
-1. Dans Termux : `pkg install android-tools`.
-2. **Options pour les développeurs** → **Débogage sans fil** : active-le, puis **Associer l'appareil avec un code d'association**. Mets les Paramètres et Termux en écran partagé.
-3. Dans Termux : `adb pair 127.0.0.1:PORT CODE`, avec le port et le code de la fenêtre d'association.
-4. Puis `adb connect 127.0.0.1:PORT`, avec le port affiché sur l'écran principal du Débogage sans fil (il est différent du précédent).
-5. Enfin :
-
-```bash
-adb shell "/system/bin/device_config set_sync_disabled_for_tests persistent; /system/bin/device_config put activity_manager max_phantom_processes 2147483647"
-```
-
-Sur Android 12L et 13, ajoute :
-
-```bash
-adb shell settings put global settings_enable_monitor_phantom_procs false
-```
-
-</details>
+- **Service permanent** : une notification fixe affiche l'état (😴 veille, 🟢 actif, 🔑 reconnexion à faire, 🛑 pause anti-ban) et les codes détectés et gagnés. Fermer l'app ne l'arrête pas.
+- **Relance automatique** :
+  - après un plantage (10 s, puis l'attente double jusqu'à 10 min) ;
+  - session Telegram expirée (code 78) : nouvel essai toutes les 30 min, avec la notification 🔑 ;
+  - bot figé (aucun signe de vie depuis 5 min) ;
+  - après un redémarrage du téléphone (après le premier déverrouillage) et après une mise à jour de l'app ;
+  - filet de sécurité toutes les 15 min.
+- **Seul le bouton ⏹️ Arrêter l'arrête durablement** : c'est un arrêt propre, le PC est prévenu tout de suite.
+- **Veille** : quand le PC est actif, le téléphone laisse les codes au PC et ferme la page Binance après 2 min (mémoire libérée).
+- **Logs** : onglet **Logs** de l'app (fichier `logs/bot.log` dans le stockage privé de l'app, archivé à 5 Mo).
 
 ### Limites, en toute honnêteté
 
-- Sous `proot`, les réclamations sont **plus lentes que sur le PC**. C'est pour ça que le PC a la priorité.
-- Les sessions Binance **expirent de temps en temps** : tu reçois l'alerte 🔑 et tu te reconnectes avec AVNC.
-- Après un redémarrage, si le téléphone a un verrouillage d'écran, le bot ne repart **qu'après le premier déverrouillage**.
+- Les sessions Binance **expirent de temps en temps** : tu reçois la notification et l'alerte 🔑, et tu te reconnectes dans l'app.
+- Après un redémarrage, le bot ne repart **qu'après le premier déverrouillage** du téléphone.
+- Node.js mobile est en version 18 et ne démarre pas sur les rares téléphones à mémoire en pages de 16 Ko (l'écran Santé le signale).
+- **HiOS (Tecno) peut couper n'importe quelle app** si Phone Master n'est pas réglé : fais l'écran Santé en entier.
 
 ---
 
@@ -293,8 +193,8 @@ Le PC et le téléphone utilisent **le même compte Binance**. S'ils réclamaien
 **Les rôles** (`BOT_ROLE`) :
 
 - `primary` (défaut) — le **PC prioritaire** ;
-- `backup` — le **téléphone de secours**. Le kit Android le règle tout seul ;
-- `solo` — un seul appareil, sans coordination. Par exemple un téléphone sans bot sur le PC : `BOT_ROLE=solo` dans `android.env`.
+- `backup` — le **téléphone de secours**. L'app Android le règle toute seule ;
+- `solo` — un seul appareil, sans coordination. Par exemple un téléphone sans bot sur le PC : **Réglages** de l'app → **Appareil seul (solo)**.
 
 **Comment ils se parlent.** Le PC garde **un seul message d'état**, silencieux, dans tes **Messages enregistrés** Telegram. Il le modifie toutes les 60 s, et tout de suite quand son état change :
 
@@ -357,7 +257,7 @@ Un message que tu t'envoies dans tes Messages enregistrés **ne sonne jamais**. 
 5. Ouvre ton nouveau bot et envoie-lui **`/start`**, une seule fois. Sans ça, Telegram lui interdit de t'écrire.
 6. Relance le bot. Au démarrage, cette ligne confirme : `🔔 Alertes : activées — problèmes + gains, via ton bot Telegram`.
 
-**Tester :** sur le téléphone, `bot login` se termine par une alerte 🔔 de test. Sur le PC, bot arrêté, `node index.js --setup` fait pareil : connexion Telegram, puis Binance, puis l'alerte de test (le message final parle du widget ▶️ : sur le PC, relance simplement `npm start`).
+**Tester :** sur le téléphone, bouton **Alerte de test** sur l'écran d'accueil de l'app. Sur le PC, bot arrêté, `node index.js --setup` fait la connexion Telegram, puis Binance, puis envoie l'alerte de test.
 
 - **Destinataire** : toi, par défaut. Ton identifiant est appris à la connexion Telegram et gardé dans `.alert-chat-id`. `ALERT_CHAT_ID` permet d'en choisir un autre.
 - **Préfixe** : chaque alerte commence par `💻 PC ·` ou `📱 Téléphone ·` (à changer avec `BOT_NAME`). Exemple : `📱 Téléphone · 💰 Gagné ! Code 92J5LXPM → 0.00000005 BNB (@vgfboxes)`.
@@ -369,11 +269,11 @@ Un message que tu t'envoies dans tes Messages enregistrés **ne sonne jamais**. 
 **Problèmes** — envoyées avec `problems` et `all` :
 
 - **🔑 « Binance demande une reconnexion… »** — 1 toutes les 3 h au plus.\
-  → PC : connecte-toi dans la fenêtre Chromium du bot. Téléphone : AVNC → `127.0.0.1:5901` (mot de passe : `bot vnc`). En attendant, les codes sont ignorés sans brûler de tentative. Si c'est le PC, le téléphone prend le relais.
+  → PC : connecte-toi dans la fenêtre Chromium du bot. Téléphone : touche la notification 🔑 (ou **Connexion Binance** dans l'app). En attendant, les codes sont ignorés sans brûler de tentative. Si c'est le PC, le téléphone prend le relais.
 - **✅ « Session Binance rétablie — les codes sont de nouveau réclamés. »** — 1 toutes les 10 min au plus.\
   → Rien à faire.
-- **🔑 « Session Telegram expirée : ouvre Termux et lance « bot login »… »** — 1 toutes les 3 h au plus.\
-  → `bot login`, ou le widget 🔑. En attendant, le superviseur réessaie toutes les 30 min. Cette alerte n'existe qu'en mode sans surveillance (téléphone, ou serveur avec `BOT_UNATTENDED=1`).
+- **🔑 « Session Telegram expirée : ouvre l'app Red Packet Bot → « Connexion Telegram » »** (téléphone) ou **« … refais la connexion avec « node index.js --setup » »** (serveur) — 1 toutes les 3 h au plus.\
+  → Téléphone : écran **Connexion Telegram** de l'app → **Se reconnecter**. Serveur : refais la connexion à la main. En attendant, le superviseur réessaie toutes les 30 min. Cette alerte n'existe qu'en mode sans surveillance (app Android, ou serveur avec `BOT_UNATTENDED=1`).
 - **🛑 « Limite Binance atteinte — pause anti-ban jusqu'à HH:MM… »** — 1 par heure au plus.\
   → Rien : la pause (5 h ou 2 h) est automatique et partagée avec l'autre appareil. Si ça revient souvent, retire des canaux peu rentables.
 - **🌐 « Chromium s'est fermé — relance automatique du navigateur… »** (ou « l'onglet Binance a planté… ») — 1 toutes les 10 min au plus.\
@@ -385,7 +285,7 @@ Un message que tu t'envoies dans tes Messages enregistrés **ne sonne jamais**. 
 - **⚠️ « Page Cryptobox inaccessible : un code n'a pas pu être tenté… »** — 1 toutes les 3 h au plus.\
   → Si ça se répète, vérifie la fenêtre Binance du bot (session, page bloquée).
 - **⚠️ « Deux appareils se déclarent « PC prioritaire »… »** — 1 toutes les 3 h au plus.\
-  → Un seul `primary` : sur le téléphone, `BOT_ROLE` doit valoir `backup` (c'est le cas par défaut, vérifie `android.env`).
+  → Un seul `primary` : sur le téléphone, le rôle doit être **Secours du PC** (c'est le cas par défaut, vérifie les **Réglages** de l'app).
 
 **Infos** — envoyées seulement avec `all` :
 
@@ -394,13 +294,13 @@ Un message que tu t'envoies dans tes Messages enregistrés **ne sonne jamais**. 
 - **📱 « Le téléphone prend le relais : … »** et **😴 « Téléphone en veille : … »** — à chaque changement, sauf au démarrage où l'alerte 🟢 suffit (1 toutes les 5 min au plus).
 - **📊 « Bilan (en ligne depuis …) : N code(s) détecté(s), N gagné(s), N échec(s). »** — chaque jour à minuit. C'est aussi un **signe de vie** : pas de bilan, c'est qu'il y a un problème.
 
-**Test** : **🔔 « Test : si tu lis ce message, les alertes du bot fonctionnent. »** — à la fin de `bot login` (ou de `node index.js --setup`).
+**Test** : **🔔 « Test : si tu lis ce message, les alertes du bot fonctionnent. »** — bouton **Alerte de test** de l'app (ou à la fin de `node index.js --setup`).
 
 ---
 
 ## 🔧 Configuration (.env)
 
-Le modèle commenté est [`.env.example`](.env.example). **Le même `.env` marche sur le PC et sur le téléphone** : le kit Android pose lui-même ce qui change sur le téléphone (voir la fin de cette section).
+Le modèle commenté est [`.env.example`](.env.example). **L'app Android importe ce même `.env`** : elle règle elle-même ce qui change sur le téléphone (voir la fin de cette section).
 
 ### Obligatoires
 
@@ -426,8 +326,8 @@ S'il en manque une, le bot s'arrête tout de suite avec `🔑 Variables manquant
 - **`NOTIFY_LEVEL`** — défaut `off` (le modèle `.env.example` met `all`). `off`, `problems` ou `all`.
 - **`ALERT_BOT_TOKEN`** — vide par défaut, et alors aucune alerte. Jeton de ton bot @BotFather.
 - **`ALERT_CHAT_ID`** — vide par défaut : les alertes vont à ton propre compte. À remplir seulement pour un autre destinataire.
-- **`BOT_NAME`** — défaut `💻 PC`, ou `📱 Téléphone` en `backup`. Préfixe des alertes et nom affiché dans le message de relais. Téléphone en `solo` ? Mets `BOT_NAME="📱 Téléphone"` dans `android.env`, sinon ses alertes commencent par `💻 PC`.
-- **`HEALTHCHECK_URL`** — vide par défaut. Adresse appelée au démarrage puis toutes les 5 min (par exemple un check healthchecks.io). Sur le téléphone, mets-la dans `android.env`.
+- **`BOT_NAME`** — défaut `💻 PC`, ou `📱 Téléphone` en `backup`. Préfixe des alertes et nom affiché dans le message de relais. Sur le téléphone, l'app met `📱 Téléphone` par défaut (option avancée dans ses Réglages).
+- **`HEALTHCHECK_URL`** — vide par défaut. Adresse appelée au démarrage puis toutes les 5 min (par exemple un check healthchecks.io). Sur le téléphone, mets-la dans les options avancées des Réglages de l'app.
 
 ### Navigateur et Binance
 
@@ -436,18 +336,17 @@ S'il en manque une, le bot s'arrête tout de suite avec `🔑 Variables manquant
 - **`CHROMIUM_PATH`** — vide par défaut : le Chromium de Playwright. Chemin d'un autre Chromium.
 - **`CHROMIUM_EXTRA_ARGS`** — vide par défaut. Options Chromium en plus, séparées par des espaces (par exemple `--disable-gpu`). ⚠️ Jamais `--disable-features` : ça écraserait la liste de Playwright.
 
-### Posées automatiquement par le kit Android
+### Posées automatiquement par l'app Android
 
-Tu n'as pas à les écrire. Sur le téléphone, le kit (surtout le superviseur `deploy/android/run.sh` et la fonction `android_env` de `lib.sh`) les exporte **avant** de lancer le bot. Elles passent donc avant ton `.env`, car dotenv ne remplace jamais une variable déjà définie.
+Tu n'as pas à les écrire : l'app les donne au bot à chaque démarrage, en plus des valeurs de ses Réglages.
 
-- **`BOT_UNATTENDED=1`** — mode sans surveillance : jamais de demande de code Telegram. Si la session n'est plus valide, le bot envoie l'alerte 🔑 et s'arrête avec le code 78 (le superviseur réessaie toutes les 30 min). Accepte `1` ou `true`. Utile aussi sous PM2 ou systemd (voir [VPS](#-déploiement-sur-un-vps)).
-- **`BOT_HEARTBEAT_FILE`** — `.run/heartbeat` : signe de vie réécrit chaque minute, lu par `bot status` et par le watchdog.
+- **`BOT_UNATTENDED=1`** — mode sans surveillance : jamais de demande de code Telegram au clavier. Si la session n'est plus valide, le bot envoie l'alerte 🔑 et s'arrête avec le code 78 (l'app réessaie toutes les 30 min). Accepte `1` ou `true`. Utile aussi sous PM2 ou systemd (voir [VPS](#-déploiement-sur-un-vps)).
+- **`BOT_HEARTBEAT_FILE`** — signe de vie réécrit toutes les 15 s (état du relais, du navigateur, codes), lu par l'app pour sa notification et son watchdog.
 - **`BOT_LAST_EXIT_CODE`** — code de sortie du lancement précédent. S'il est supérieur à 0, l'alerte de démarrage est ♻️ « relancé » au lieu de 🟢 « en ligne ».
-- **`BOT_SCREEN=vnc`** — les messages de connexion Binance renvoient vers AVNC.
-- **`FORCE_COLOR=1`** — garde les couleurs dans `logs/bot.log`, pour que `bot logs` ressemble à la console.
-- Et aussi : `BOT_ROLE=backup`, `BINANCE_LOGIN_TIMEOUT=0`, `LOG_WIDTH=48`, `BROWSER_USER_AGENT=native`, `DISPLAY=:1` (écran virtuel) et `TZ` (fuseau horaire du téléphone, pour l'heure des logs).
-
-**Pour changer un réglage sur le téléphone seulement**, utilise `android.env`, à la racine du projet. Il est lu après les réglages automatiques ci-dessus : il passe donc avant eux et avant ton `.env` (sauf `BOT_UNATTENDED`, `BOT_HEARTBEAT_FILE` et `BOT_LAST_EXIT_CODE`, toujours posés par le superviseur). Il est créé à l'installation avec `BOT_ROLE=backup`, et des exemples commentés pour `HEALTHCHECK_URL` et `CHROMIUM_EXTRA_ARGS`. Si le Chromium de Playwright ne s'installe pas, l'installation y ajoute `CHROMIUM_PATH=/usr/bin/chromium` (et retire cette ligne dès que celui de Playwright s'installe, par exemple lors d'un `bot update`). Ce fichier est lu par bash : mets des guillemets autour d'une valeur qui contient des espaces. Après une modification : `bot restart`.
+- **`BOT_PLATFORM=android`** — les messages renvoient vers l'app (connexion Telegram ou Binance, arrêt, réglages du téléphone) ; la page Binance est la WebView de l'app.
+- **`BOT_DATA_DIR`** — dossier des données du bot (historique, session, alertes) dans le stockage privé de l'app. Sur le PC : la racine du projet.
+- **`TG_SESSION_STORAGE=string`** — session Telegram gardée en texte (Node.js mobile n'a pas de SQLite natif). `BOT_TG_LOGIN=1` quand tu touches **Se connecter** : le code se tape dans l'app.
+- Et aussi : `BOT_ROLE` (réglé dans l'app : `backup` ou `solo`), `BINANCE_LOGIN_TIMEOUT=0`, `LOG_WIDTH=48`, `NO_COLOR=1` et `TZ` (fuseau horaire du téléphone).
 
 ---
 
@@ -512,7 +411,7 @@ Un démarrage typique sur le PC :
 [07/10 21:34:18] ✅ OK    — 🏁 Code 92J5LXPM traité en 6324 ms
 ```
 
-**Sur le téléphone**, tout va dans `logs/bot.log`. `bot logs` l'affiche en couleurs, comme la console ; il est archivé dans `logs/bot.log.1` à 5 Mo. Le superviseur, le démarrage du téléphone et le watchdog (seulement quand il agit) y écrivent dans le même style. L'écran virtuel écrit dans `logs/xvnc.log`.
+**Sur le téléphone**, l'onglet **Logs** de l'app affiche les mêmes lignes, en couleurs, avec **Copier** et **Partager**. Le fichier `logs/bot.log` (stockage privé de l'app) est archivé dans `logs/bot.log.1` à 5 Mo.
 
 ### Bilan d'activité
 
@@ -668,22 +567,19 @@ red-packet-bot-telegram/
 │   ├── queue.js           # File d'attente : un code à la fois
 │   ├── history.js         # Anti-doublons 48 h (history.json)
 │   ├── stats.js           # Compteurs du bilan d'activité
-│   └── logger.js          # Logs horodatés, alignés et colorés
-├── deploy/android/        # Kit Android (Termux)
-│   ├── install.sh         # Installation complète (dans Termux)
-│   ├── setup-debian.sh    # Node.js, npm ci, Chromium, VNC (dans Debian)
-│   ├── chromium-test.js   # Test de démarrage de Chromium
-│   ├── bot.sh             # Commande « bot » (start, stop, status…)
-│   ├── launch.sh          # Tâche de fond Termux → superviseur
-│   ├── run.sh             # Superviseur : relance, écran virtuel, logs
-│   ├── login.sh           # « bot login » : node index.js --setup
-│   ├── boot.sh            # Démarrage du téléphone (Termux:Boot)
-│   ├── watchdog.sh        # Vérification toutes les 15 min (Termux:API)
-│   └── lib.sh             # Fonctions communes (logs, écran VNC, réglages)
-├── GUIDE-ANDROID.md       # Guide pas à pas pour le téléphone
+│   ├── logger.js          # Logs horodatés, alignés et colorés
+│   ├── webview-browser.js # Page Binance de l'app Android (WebView pilotée par Playwright)
+│   ├── paths.js           # Dossier des données (BOT_DATA_DIR)
+│   └── platform.js        # Messages adaptés : PC/serveur ou app Android
+├── android/               # App Android (APK)
+│   ├── app/               # Projet Android Studio (Kotlin) : service, écrans, WebView
+│   ├── node/entry.js      # Démarrage du bot dans l'app (Node.js mobile)
+│   └── scripts/build-apk.mjs  # « npm run apk » : compile l'APK
+├── GUIDE-ANDROID.md       # Guide de l'app Android
+├── GUIDE-DEBOGAGE.md      # Déboguer l'app avec Claude (adb) + problèmes résolus
 ├── README.md
 ├── .env.example           # Modèle de configuration
-├── .gitattributes         # Fins de ligne LF (scripts Android)
+├── .gitattributes         # Fins de ligne
 ├── .gitignore
 ├── package.json
 └── package-lock.json
@@ -693,24 +589,21 @@ Créés pendant le fonctionnement, **jamais versionnés** :
 
 ```
 ├── .env                   # Tes réglages ⚠️ secret
-├── android.env            # Réglages propres au téléphone
 ├── client.session*        # Session Telegram (SQLite) ⚠️ secret
 ├── browser-data/          # Profil Chromium + cookies Binance ⚠️ secret
 ├── history.json           # Codes déjà traités (purge à 48 h)
 ├── .alert-chat-id         # Destinataire des alertes
-├── .run/                  # PID, signe de vie, délais des alertes
-├── .stop                  # Présent = bot arrêté par toi (téléphone)
-├── .vnc-password          # Mot de passe de l'écran VNC (téléphone)
-└── logs/                  # bot.log, bot.log.1, xvnc.log (téléphone)
+├── .run/                  # Délais des alertes
+└── dist/                  # APK produite par « npm run apk »
 ```
 
-Sur le téléphone, le dépôt est cloné dans `~/red-packet-bot-telegram` côté Termux, et monté sur `/bot` dans Debian.
+Sur le téléphone, ces fichiers vivent dans le stockage privé de l'app (jamais dans `/sdcard`). La clé de signature de l'APK est dans `~/.red-packet-bot/` sur le PC : garde-en une copie.
 
 ---
 
 ## 🌐 Déploiement sur un VPS
 
-Le bot ouvre une **vraie fenêtre** Chromium (`headless: false`). Sur un serveur sans écran, il lui faut un écran virtuel : `xvfb-run`. Et pour la **première connexion Binance**, il faut pouvoir voir cette fenêtre (bureau à distance, VNC…). C'est ce que fait le kit Android avec Xvnc et AVNC.
+Le bot ouvre une **vraie fenêtre** Chromium (`headless: false`). Sur un serveur sans écran, il lui faut un écran virtuel : `xvfb-run`. Et pour la **première connexion Binance**, il faut pouvoir voir cette fenêtre (bureau à distance, VNC…).
 
 Préparation :
 
@@ -725,7 +618,7 @@ sudo timedatectl set-ntp true          # horloge à l'heure : indispensable
 > [!IMPORTANT]
 > **Synchronise l'horloge.** Une horloge qui avance ferait rejeter tous les messages comme « antérieurs au démarrage ».
 
-Sous un superviseur, active le **mode sans surveillance** (`BOT_UNATTENDED=1`) : le bot ne demande jamais de code Telegram. Si la session n'est plus valide, il t'envoie l'alerte 🔑 et s'arrête avec le code **78**, au lieu de rester bloqué sur une question. Fais donc la **première connexion à la main** avant de lui confier le bot. (L'alerte parle de `bot login` : sur un serveur, ça veut dire refaire la connexion à la main.) Astuce : `BOT_NAME="🖥️ VPS"` dans `.env` pour reconnaître ses alertes.
+Sous un superviseur, active le **mode sans surveillance** (`BOT_UNATTENDED=1`) : le bot ne demande jamais de code Telegram. Si la session n'est plus valide, il t'envoie l'alerte 🔑 et s'arrête avec le code **78**, au lieu de rester bloqué sur une question. Fais donc la **première connexion à la main** avant de lui confier le bot. (L'alerte te dit alors de refaire la connexion avec `node index.js --setup`.) Astuce : `BOT_NAME="🖥️ VPS"` dans `.env` pour reconnaître ses alertes.
 
 ### Option 1 : PM2
 
@@ -786,22 +679,21 @@ sudo journalctl -u cryptobox-bot -f
    - `.env` (identifiants API, jeton du bot d'alertes) ;
    - `client.session*` (ta session Telegram) ;
    - `browser-data/` (ta session Binance) ;
-   - `android.env`, `.vnc-password`, `.alert-chat-id`.
+   - `.alert-chat-id` ;
+   - `~/.red-packet-bot/` (la clé de signature de l'APK).
 2. Ils sont tous dans le [`.gitignore`](./.gitignore). Extrait :
    ```gitignore
    .env
-   android.env
    *.session*
    browser-data/
    history.json*
    .run/
-   .stop
    .alert-chat-id
-   .vnc-password
    logs/
+   *.jks
    ```
 3. **Session divulguée ?** Les fichiers de session Telegram (`client.session`, `my-session.session*`) étaient suivis par Git. Ils sont retirés du dépôt, mais restent dans l'historique de ce dépôt public : n'importe qui les ayant récupérés pourrait prendre le contrôle du compte Telegram. Il fallait donc, dans Telegram : **Paramètres → Appareils → « Mettre fin aux autres sessions »**. Refais-le chaque fois qu'un de ces fichiers a pu fuiter (le bot te redemandera le code une fois).
-4. **Jeton du bot d'alertes divulgué ?** Révoque-le avec @BotFather (`/revoke`), puis mets le nouveau jeton dans `.env`, sur le PC **et** sur le téléphone (puis `bot restart`).
+4. **Jeton du bot d'alertes divulgué ?** Révoque-le avec @BotFather (`/revoke`), puis mets le nouveau jeton dans `.env` sur le PC, **et** dans les Réglages de l'app sur le téléphone.
 5. **Numéro secondaire** : l'idéal est un numéro dédié au compte du bot. S'il est banni, ton vrai compte reste intact.
 6. **Risque Binance** : l'automatisation peut être détectée. La fenêtre visible et les pauses anti-ban réduisent ce risque, sans l'éliminer.
 7. **Sur un VPS** : pas de `root`, un utilisateur dédié.
@@ -821,21 +713,19 @@ sudo journalctl -u cryptobox-bot -f
 | `🕰️ Beaucoup de messages jugés périmés` | Vérifie l'horloge, ou augmente `MAX_MESSAGE_AGE_S`. |
 | `🐢 Limite Telegram atteinte` | Le bot gère seul. Fréquent au démarrage ? Réduis le nombre de canaux. |
 | `🚨 ALERTE ANTI-BAN` ou `🚨 AVERTISSEMENT ANTI-BAN` | Pause automatique (5 h ou 2 h). Trop de codes morts : retire les canaux les moins rentables. |
-| `⏭️ Code … abandonné — champ de saisie introuvable` | Page lente ou session expirée : regarde la fenêtre Binance (PC) ou AVNC (téléphone). |
-| `🔑 Session Binance expirée — code … non soumis` | Reconnecte-toi : fenêtre Chromium (PC) ou AVNC (téléphone). |
+| `⏭️ Code … abandonné — champ de saisie introuvable` | Page lente ou session expirée : regarde la fenêtre Binance (PC), ou ouvre **Connexion Binance** dans l'app (téléphone). |
+| `🔑 Session Binance expirée — code … non soumis` | Reconnecte-toi : fenêtre Chromium (PC), ou notification 🔑 / **Connexion Binance** dans l'app (téléphone). |
 | `⏰ Timeout — connexion Binance non détectée` | Connecte-toi plus vite, ou augmente `BINANCE_LOGIN_TIMEOUT` (`0` = sans limite). |
 | Session Telegram invalide (PC) | Supprime les fichiers `client.session*` et relance `npm start`. |
-| `🔑 Session Telegram à refaire` (téléphone) | `bot login`, ou le widget 🔑. |
+| `🔑 Session Telegram à refaire` (téléphone) | App → **Connexion Telegram** → **Se reconnecter**. |
 | `🔕 Alerte non envoyée : … envoie /start …` | Envoie `/start` à ton bot d'alertes. |
 | `🔕 Alerte non envoyée : … vérifie ALERT_BOT_TOKEN` | Jeton faux ou révoqué : recopie-le depuis @BotFather. |
 | `🔕 Alertes : destinataire inconnu` | Normal avant la première connexion Telegram. Sinon, remplis `ALERT_CHAT_ID`. |
-| `🤝 Relais : un AUTRE appareil se déclare aussi PC prioritaire` | Un seul `primary` : le téléphone doit être en `backup` (`android.env`). |
-| Le bot s'arrête tout seul sur le téléphone | Réglages Android (batterie, phantom process killer) et `bot watchdog on`. Voir l'étape 8 du guide. |
-| `Mise à jour des dépendances impossible` (`bot update`) | Le bot reste arrêté. Vérifie ta connexion Internet, puis relance `bot update`. |
-| `💥 L'onglet Binance a planté (mémoire insuffisante ?)` | Ferme des applis. Essaie `CHROMIUM_EXTRA_ARGS="--disable-gpu"` dans `android.env`. |
-| AVNC ne se connecte pas | L'écran n'existe que si le bot tourne, ou pendant `bot login`. Adresse `127.0.0.1`, port `5901`, mot de passe : `bot vnc`. |
-| `Watchdog non activé` | Installe Termux:API (F-Droid), ouvre-la une fois, puis `bot watchdog on`. |
+| `🤝 Relais : un AUTRE appareil se déclare aussi PC prioritaire` | Un seul `primary` : le téléphone doit être en **Secours du PC** (Réglages de l'app). |
+| Le bot s'arrête tout seul sur le téléphone | Écran **Santé** de l'app : notification « Bot en marche » active (elle empêche le gel de HiOS), batterie sans restriction, démarrage auto et applis protégées dans Phone Master. Voir l'[étape 7 du guide](GUIDE-ANDROID.md#7-les-réglages-du-téléphone-écran-santé). Toujours endormi ? Le [guide de débogage](GUIDE-DEBOGAGE.md) explique comment laisser Claude examiner le téléphone par câble USB. |
+| `💥 L'onglet Binance a planté (mémoire insuffisante ?)` | Ferme des applis. Le navigateur est relancé tout seul (l'app recrée sa page Binance). Sur PC ou VPS : `CHROMIUM_EXTRA_ARGS="--disable-gpu"`. |
 | Le bot plante au démarrage sur un VPS | `npx playwright install-deps chromium`. |
+| `npm run apk` échoue | Voir le [dépannage du guide Android](GUIDE-ANDROID.md#11-dépannage) (SDK, NDK 27.1, CMake 3.22.1). |
 
 ---
 
