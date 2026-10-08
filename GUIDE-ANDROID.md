@@ -544,6 +544,28 @@ Android aime fermer les applis qui tournent en arrière-plan. Le bot se défend 
 
 Les noms changent selon la marque : voir 8.6.
 
+### 8.1 bis Internet en arrière-plan (sinon Telegram coupe à l'écran verrouillé)
+
+Symptôme : dans `bot logs`, « 📡 Connexion Telegram perdue — reconnexion automatique » revient dès que **l'écran se verrouille** ou que **tu quittes Termux**. Le bot tourne toujours, mais **Android lui coupe Internet** en arrière-plan : pendant ces coupures, aucun code n'arrive. Ces réglages sont **indispensables** :
+
+1. **Wake lock actif** : tire le volet des notifications. La notification de Termux doit indiquer **« wake lock held »** (et « 1 task »). Si tu vois un bouton **« Acquire wakelock »**, appuie dessus (ou tape `termux-wake-lock` dans Termux). N'appuie jamais sur « Release wakelock ».
+2. **Batterie « Sans restriction »** pour Termux (8.1). C'est ce qui autorise Termux à garder Internet quand le téléphone dort. Si Android te demande « Autoriser Termux à toujours s'exécuter en arrière-plan ? », réponds **Autoriser**.
+3. **Données en arrière-plan** : Paramètres → Applications → **Termux** → **Données mobiles et Wi-Fi** (ou « Utilisation des données ») :
+   - **Données en arrière-plan** : **activé** ;
+   - **Utilisation des données sans restriction** (ou « illimitée ») : **activé**.
+4. **Économiseur de données** désactivé : Paramètres → Réseau et Internet (ou Connexions) → **Économiseur de données** → désactivé. Ou laisse-le, mais ajoute Termux aux applis autorisées.
+5. **Wi-Fi pendant la veille** : si ton téléphone a l'option, Paramètres Wi-Fi → ⋮ / Avancé → **Garder le Wi-Fi activé pendant la veille : Toujours**. Désactive aussi « Basculer automatiquement vers les données mobiles » si le Wi-Fi est bon.
+6. **Téléphone en charge** (8.3) : branché, Android ne passe pas en veille profonde et coupe beaucoup moins.
+7. Les réglages de **ta marque** (8.6) : démarrage automatique, applis « jamais en veille », etc.
+
+**Test** : verrouille l'écran **5 minutes**, puis dans Termux :
+
+```bash
+bot logs
+```
+
+Pendant ces 5 minutes, il ne doit plus y avoir de ligne « 📡 Connexion Telegram perdue ». S'il en reste, refais les points 1 à 7 (le 3 et le 7 sont les plus souvent oubliés).
+
 ### 8.2 Verrouille Termux dans les applis récentes
 
 Ouvre les applis récentes. Appui long sur Termux (ou sur son icône, en haut de la vignette) → **Verrouiller** (cadenas 🔒). Ainsi, « Tout fermer » ne le touche pas.
@@ -1567,6 +1589,10 @@ Android a tué Termux, ou « Exit » a été pressé. Le watchdog le relancera d
 2. Vérifie le watchdog : `bot status` → « 🛡️ Watchdog activé ». Sinon : `bot watchdog on`.
 3. Laisse le téléphone branché.
 4. N'appuie pas sur « Exit » dans la notification de Termux.
+
+### La connexion Telegram coupe quand l'écran se verrouille ou quand je quitte Termux
+
+Dans `bot logs`, « 📡 Connexion Telegram perdue — reconnexion automatique » (ou des erreurs `ECONNABORTED`) reviennent toutes les 1 à 2 minutes dès que Termux n'est plus à l'écran. Le bot tourne, mais **Android lui coupe Internet en arrière-plan** : fais l'étape [8.1 bis](#81-bis-internet-en-arrière-plan-sinon-telegram-coupe-à-lécran-verrouillé) (wake lock, batterie « Sans restriction », données en arrière-plan, économiseur de données, Wi-Fi en veille), puis le test de 5 minutes écran verrouillé.
 
 ### « Watchdog non activé »
 
