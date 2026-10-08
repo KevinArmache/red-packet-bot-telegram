@@ -161,12 +161,13 @@ Tu vas installer 5 applis. Les 4 applis Termux viennent **toutes de F-Droid**.
 6. Ouvre **Termux:API** une fois, puis ferme-le.
 7. Dans Termux, tape `uname -m` puis Entrée. Tu dois voir `aarch64`. Si tu vois autre chose (`armv7l`, `armv8l`…), ton téléphone n'est pas compatible.
 
-### Les pièges à éviter
+### Les pièges à éviter 
 
 - ❌ **Termux du Play Store** déjà installé ? Désinstalle-le d'abord : les deux ne peuvent pas cohabiter. Attention, ça efface tout ce qu'il contenait.
 - ❌ **Mélanger les sources**, par exemple Termux de F-Droid avec Termux:API du Play Store. Tout depuis F-Droid.
 - ⚠️ **Play Protect** peut afficher un avertissement sur Termux (appli conçue pour une ancienne version d'Android). Choisis « Installer quand même ».
 - ⚠️ Fais aussi les **mises à jour** des applis Termux depuis F-Droid.
+- ⚠️ **« Package non valide »** à l'installation de F-Droid ? Le fichier est incomplet : voir [Dépannage](#-lapplication-na-pas-été-installée-car-le-package-semble-ne-pas-être-valide-).
 
 ### Les gestes de base dans Termux
 
@@ -696,6 +697,38 @@ Dans `android.env`, une valeur par ligne (`NOM=valeur`), entre guillemets s'il y
 - `LOG_WIDTH=48` (largeur des encadrés dans les logs).
 
 Ne touche pas à une éventuelle ligne `CHROMIUM_PATH=` : c'est l'installation qui la gère.
+
+### Ajouter ou retirer des canaux
+
+Les canaux surveillés sont sur la ligne `TARGET_CHANNELS` du fichier **`.env`**.
+
+1. Dans Termux, ouvre le fichier :
+
+   ```bash
+   nano ~/red-packet-bot-telegram/.env
+   ```
+
+   (Si `nano` est introuvable : `pkg install -y nano`.)
+2. Descends jusqu'à la ligne `TARGET_CHANNELS` avec les flèches de la rangée de touches du bas.
+3. Ajoute (ou retire) des canaux, **séparés par des virgules, sans espaces** :
+
+   ```
+   TARGET_CHANNELS=@vgfboxes,@binance_box_channel,@nouveaucanal,@autrecanal
+   ```
+
+   Chaque canal peut s'écrire `@nomducanal`, `https://t.me/nomducanal`, ou avec son identifiant numérique pour un canal privé (`-1001234567890`).
+4. Enregistre : **Ctrl+O** puis **Entrée**. Quitte : **Ctrl+X**.
+5. Redémarre le bot pour qu'il prenne la nouvelle liste :
+
+   ```bash
+   bot restart
+   ```
+
+6. Vérifie avec `bot logs` : au démarrage, la ligne `🎯 N canal(aux) demandé(s) dans TARGET_CHANNELS` doit afficher le nouveau nombre, et les canaux trouvés sont listés sous « 📡 Canaux surveillés ». Un canal introuvable apparaît avec 🚧.
+
+💡 **Rejoins les canaux** avec ton compte Telegram : le bot les trouve bien plus vite, et il ne peut pas lire un canal privé dont tu n'es pas membre.
+
+💡 Le `.env` du **PC** est un fichier séparé : pour avoir les mêmes canaux sur le PC, fais la même modification, puis relance `npm start`.
 
 ### Où sont les fichiers
 
@@ -1317,7 +1350,46 @@ Relance la même commande, elle reprend où elle en était :
 bash ~/red-packet-bot-telegram/deploy/android/install.sh
 ```
 
-### « Installation des paquets Termux impossible (réseau ?) » ou erreurs de `pkg`
+### « L'application n'a pas été installée car le package semble ne pas être valide »
+
+Le fichier APK téléchargé est **incomplet ou abîmé** (téléchargement coupé, réseau instable).
+
+1. Supprime le fichier déjà téléchargé (app **Fichiers → Téléchargements**).
+2. Passe sur un **Wi-Fi stable**, puis ouvre dans Chrome le lien direct **https://f-droid.org/F-Droid.apk**.
+3. Attends « Téléchargement terminé » et vérifie dans **Fichiers → Téléchargements** que le fichier fait **une dizaine de Mo** (quelques Ko = raté, recommence).
+4. Touche le fichier → **Installer** (autorise la source si Android le demande).
+
+**Plan B, sans l'appli F-Droid** : télécharge directement chaque APK sur le site F-Droid. Sur chaque page, prends la version marquée **« Recommandé »** (pas « beta ») → **« Télécharger APK »** :
+
+- Termux : https://f-droid.org/fr/packages/com.termux/ (≈ 108 Mo : en Wi-Fi)
+- Termux:Boot : https://f-droid.org/fr/packages/com.termux.boot/
+- Termux:Widget : https://f-droid.org/fr/packages/com.termux.widget/
+- Termux:API : https://f-droid.org/fr/packages/com.termux.api/
+
+⚠️ Les 4 au même endroit (f-droid.org), jamais mélangés avec le Play Store ou GitHub.
+
+Autre message de blocage : sur **Samsung**, désactive le temps de l'installation Paramètres → Sécurité et confidentialité → **Blocage automatique**. Sur **Tecno / Infinix / itel**, autorise « Installer des applis inconnues » pour Chrome ou Fichiers, et choisis « Installer quand même » si Phone Master bloque.
+
+### « killed by signal » pendant l'installation (paquets Termux)
+
+Exemple : `dpkg-deb: error: <decompress> subprocess was killed by signal (Killed)`, puis `Installation des paquets Termux impossible`.
+
+Android a **coupé l'installation** : Termux est passé en arrière-plan, l'écran s'est éteint, ou la mémoire manquait. Ce n'est pas un problème de réseau.
+
+1. Répare puis relance, une ligne à la fois :
+
+   ```bash
+   termux-wake-lock
+   dpkg --configure -a
+   apt --fix-broken install -y
+   git -C ~/red-packet-bot-telegram pull
+   bash ~/red-packet-bot-telegram/deploy/android/install.sh
+   ```
+
+2. Jusqu'à la fin de l'installation (15 à 30 min) : garde **Termux ouvert au premier plan**, l'**écran allumé** (mets la mise en veille de l'écran au maximum), le téléphone **en charge**, et ferme les autres applis.
+3. L'installateur répare et réessaie maintenant tout seul (3 essais). Si ça recommence quand même, fais d'abord l'étape [8.5 (phantom process killer)](#85-le--phantom-process-killer--android-12-et-plus), puis relance.
+
+### « Installation des paquets Termux impossible » ou autres erreurs de `pkg`
 
 1. Vérifie ta connexion Internet.
 2. Change de miroir avec `termux-change-repo`, choisis-en un autre, puis relance l'installation.
