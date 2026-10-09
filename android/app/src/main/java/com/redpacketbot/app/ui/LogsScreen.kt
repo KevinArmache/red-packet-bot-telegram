@@ -13,8 +13,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -53,6 +55,19 @@ private fun tail(file: File, maxBytes: Int = 96 * 1024, maxLines: Int = 400): Li
     }
 }
 
+/**
+ * Vide logs/bot.log et supprime l'archive bot.log.1. Le bot écrit en fin de
+ * fichier (ajout) : ses lignes suivantes repartent simplement de zéro.
+ */
+private fun clearLogs(file: File) {
+    try {
+        if (file.exists()) RandomAccessFile(file, "rw").use { it.setLength(0) }
+        File(file.path + ".1").delete()
+    } catch (_: Exception) {
+        /* fichier occupé ou absent : rien à effacer */
+    }
+}
+
 private fun colorOf(line: String): Color = when {
     "ERROR" in line || "❌" in line || "💥" in line -> Color(0xFFC62828)
     "WARN" in line || "⚠️" in line -> Color(0xFFE65100)
@@ -65,6 +80,7 @@ fun LogsScreen() {
     val context = LocalContext.current
     val files = remember { AppFiles(context) }
     var lines by remember { mutableStateOf(emptyList<String>()) }
+    var confirmClear by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(Unit) {
@@ -93,9 +109,30 @@ fun LogsScreen() {
                     .putExtra(Intent.EXTRA_TEXT, lines.takeLast(200).joinToString("\n"))
                 context.startActivity(Intent.createChooser(send, "Partager les logs"))
             }) { Text("Partager") }
+            OutlinedButton(onClick = { confirmClear = true }) { Text("Effacer") }
+        }
+        if (confirmClear) {
+            AlertDialog(
+                onDismissRequest = { confirmClear = false },
+                title = { Text("Effacer les logs ?") },
+                text = { Text("Les logs affichés ici sont vidés. Le bot continue de tourner et écrit les suivants.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirmClear = false
+                        clearLogs(files.logFile)
+                        lines = emptyList()
+                        Toast.makeText(context, "Logs effacés", Toast.LENGTH_SHORT).show()
+                    }) { Text("Effacer") }
+                },
+                dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Annuler") } },
+            )
         }
         if (lines.isEmpty()) {
-            Text("Pas encore de logs : démarre le bot.", Modifier.padding(16.dp))
+            Text(
+                "Pas de logs pour le moment : les prochaines lignes du bot s'afficheront ici " +
+                    "(s'il est arrêté, démarre-le depuis l'Accueil).",
+                Modifier.padding(16.dp),
+            )
         }
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             items(lines) { line ->

@@ -114,6 +114,22 @@ object Health {
             else "Pages mémoire de ${pageSize / 1024} Ko : Node.js mobile risque de ne pas démarrer.",
         )
 
+        // HiOS « AI Net » : coupe le Wi-Fi et les données pendant le sommeil
+        // (constaté : Telegram coupé 30 à 50 min, plusieurs fois par nuit)
+        val aiNet = try {
+            Settings.Global.getString(context.contentResolver, "ai_net_control_enable")
+        } catch (_: Exception) {
+            null
+        }
+        if (aiNet != null) {
+            items += Item(
+                "ainet", "Tecno : réseau gardé la nuit", aiNet != "1",
+                "Le réglage HiOS « AI Net » coupe le Wi-Fi et les données pendant ton sommeil : le bot devient " +
+                    "sourd 30 à 50 min, plusieurs fois par nuit. Pour le couper, par câble : " +
+                    "adb shell settings put global ai_net_control_enable 0, puis redémarre le téléphone.",
+            )
+        }
+
         items += Item(
             "autostart", "Tecno : démarrage automatique", null,
             "Phone Master → Accélérer → Gestion du démarrage auto → active Red Packet Bot. " +

@@ -47,26 +47,52 @@ fs.mkdirSync(LOG_DIR, { recursive: true });
 
 const LOG_FILE = path.join(LOG_DIR, "bot.log");
 const LOG_MAX_BYTES = 5 * 1024 * 1024;
-let logFd = fs.openSync(LOG_FILE, "a");
-let logSize = fs.fstatSync(logFd).size;
+
+/** Ouvre logs/bot.log en ajout ; -1 si impossible (jamais un descripteur périmé). */
+function openLog() {
+  try {
+    return fs.openSync(LOG_FILE, "a");
+  } catch (_) {
+    return -1;
+  }
+}
+
+let logFd = openLog();
+let logSize = logFd >= 0 ? fs.fstatSync(logFd).size : 0;
 
 function rotateLog() {
   try {
-    fs.closeSync(logFd);
+    if (logFd >= 0) fs.closeSync(logFd);
+  } catch (_) {
+    /* déjà fermé */
+  }
+  logFd = -1;
+  try {
     fs.renameSync(LOG_FILE, `${LOG_FILE}.1`);
   } catch (_) {
-    /* on continue dans le même fichier */
+    /* on repart dans le même fichier */
   }
-  logFd = fs.openSync(LOG_FILE, "a");
+  logFd = openLog();
   logSize = 0;
 }
 
 function writeLog(chunk, encoding) {
   try {
+    if (logFd < 0) {
+      // Réouverture ratée plus tôt : nouvel essai, sans jamais écrire ailleurs
+      logFd = openLog();
+      if (logFd < 0) return;
+      logSize = fs.fstatSync(logFd).size;
+    }
     const buf = Buffer.isBuffer(chunk)
       ? chunk
       : Buffer.from(String(chunk), typeof encoding === "string" ? encoding : "utf-8");
-    if (logSize + buf.length > LOG_MAX_BYTES) rotateLog();
+    if (logSize + buf.length > LOG_MAX_BYTES) {
+      // Logs effacés depuis l'app (fichier vidé) : on reprend la vraie taille
+      logSize = fs.fstatSync(logFd).size;
+      if (logSize + buf.length > LOG_MAX_BYTES) rotateLog();
+      if (logFd < 0) return;
+    }
     fs.writeSync(logFd, buf);
     logSize += buf.length;
   } catch (_) {

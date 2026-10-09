@@ -11,7 +11,10 @@ Ce guide sert quand l'app **Red Packet Bot** se comporte mal sur le téléphone.
 3. [Les commandes utiles](#3-les-commandes-utiles)
 4. [Résolu : le bot s'endort quand on verrouille ou qu'on quitte l'app (Tecno)](#4-résolu--le-bot-sendort-quand-on-verrouille-ou-quon-quitte-lapp-tecno)
 5. [Résolu : l'ancien bot Termux tournait encore](#5-résolu--lancien-bot-termux-tournait-encore)
-6. [Si le bot s'endort de nouveau](#6-si-le-bot-sendort-de-nouveau)
+6. [Résolu : « GAGNÉ » dans les logs, mais rien d'encaissé sur Cryptobox (téléphone)](#6-résolu--gagné-dans-les-logs-mais-rien-dencaissé-sur-cryptobox-téléphone)
+7. [Résolu : Telegram coupé 30 à 50 minutes la nuit (HiOS « AI Net »)](#7-résolu--telegram-coupé-30-à-50-minutes-la-nuit-hios--ai-net-)
+8. [Résolu : le bot ne repartait pas après une mise à jour de l'app](#8-résolu--le-bot-ne-repartait-pas-après-une-mise-à-jour-de-lapp)
+9. [Si le bot s'endort de nouveau](#9-si-le-bot-sendort-de-nouveau)
 
 ---
 
@@ -111,6 +114,16 @@ adb shell "logcat -d | grep -E 'Usf_Hiber|isProgressing' | grep -E 'redpacket|<U
 adb shell "dumpsys notification --noredact | grep -A30 pkg=com.redpacketbot.app | grep -E 'android.title=|showChronometer'"
                                                  # → android.showChronometer=Boolean (true)
 ```
+
+**La page Binance du bot, vue depuis le PC** (outils développeur de Chromium)
+
+```bash
+adb forward tcp:9333 localabstract:webview_devtools_remote_<PID>
+curl http://127.0.0.1:9333/json/list             # → la page « Red Packet | Binance » de la WebView
+```
+
+- Dans Chrome sur le PC, `chrome://inspect` affiche aussi la page : on peut lire son contenu (onglet Elements) et ses requêtes (onglet Network). L'aperçu reste noir, car la WebView n'est jamais affichée.
+- Sers-t'en pour **observer**. N'y tape jamais un code à la main, sauf test voulu : chaque code n'est soumis qu'une fois (règle zéro retry).
 
 **Installer une APK en gardant les données**
 
@@ -261,7 +274,119 @@ adb shell "ps -A -o USER,ARGS | grep -E 'proot|Xvnc|/bot/'"  # rien (à part la 
 
 ---
 
-## 6. Si le bot s'endort de nouveau
+## 6. Résolu : « GAGNÉ » dans les logs, mais rien d'encaissé sur Cryptobox (téléphone)
+
+**Résolu le 09/10/2026.**
+
+### Le symptôme
+
+Les logs annonçaient « 💰 GAGNÉ ! Code … → montant à vérifier sur Binance » pour chaque code, et le bilan affichait « 💰 Gains 21 (100 %) ». En réalité, l'historique Cryptobox était vide : aucun code n'avait été encaissé depuis l'installation de l'app.
+
+### Le diagnostic
+
+On a branché les outils développeur de Chromium sur la WebView du bot, par câble, depuis le PC (voir la [partie 3](#3-les-commandes-utiles)). Un observateur **passif** (il ne clique pas et ne tape rien) a lu la page et enregistré les requêtes pendant les réclamations du bot :
+
+1. Après le passage du bot, le champ contenait encore le dernier code, sans aucune fenêtre ouverte : le clic sur « Ouvrir » n'avait jamais eu lieu.
+2. Un test avec un code récent, à la demande de l'utilisateur, a montré que réclamer un code se fait **en deux temps** :
+   - « Réclamer » envoie `POST …/gift-box/code/query`. Binance répond si le Red Packet est encore à prendre (`grabbed`, `fullyClaimed`), sans rien encaisser.
+   - La fenêtre « Vous avez reçu un Red Packet » apparaît alors avec un bouton `<button>` « Ouvrir ». Ce clic envoie `POST …/gift-box/code/grabV2`, qui encaisse : `{"success":true,"currency":"SPELL","grabAmountStr":"0.0009"}`.
+3. Sur le téléphone, cette fenêtre arrivait **4 à 6 secondes** après le clic. Mesure faite : la WebView, jamais affichée, ne produisait plus que **0,7 image par seconde**, et Chromium attend une image pour traiter chaque clic (4,4 s par événement de souris).
+
+### Les causes
+
+- Le bot cherchait « Ouvrir » pendant environ 1 seconde : trop court sur le téléphone, la fenêtre arrivait après.
+- Le bot annonçait « GAGNÉ » dès qu'aucun message d'erreur n'était visible. Un clic sans effet passait donc pour un gain.
+
+### La solution
+
+- **Le résultat vient des réponses de Binance**, plus de l'écran. `claimCode` (dans `src/binance.js`) écoute les deux requêtes avant de cliquer :
+  - un refus (code inexistant, Red Packet épuisé ou déjà réclamé, limite) est lu dans la réponse de `code/query` ;
+  - le montant (« 0.0009 SPELL ») vient de la réponse de `grabV2`, et va dans les logs et dans l'alerte Telegram, comme sur le PC.
+- **« Ouvrir » est attendu jusqu'à 20 s**, et cherché uniquement dans la fenêtre du Red Packet. Le bot ne clique toujours qu'une fois sur « Réclamer » et une fois sur « Ouvrir ».
+- **Plus jamais de faux « GAGNÉ »** : sans réponse de Binance, le résultat est « ❔ inconnu », avec une alerte, et il n'est pas compté comme gagné.
+- **Pompe d'images** (`BotService`, Android seulement). Pendant une réclamation ou un chargement, l'app dessine la WebView dans une minuscule image toutes les 33 ms. Chromium produit alors une image à chaque fois, et clics comme fenêtres redeviennent fluides, même écran éteint.
+
+### La vérification
+
+- **Sur le PC** : `npm run test:claim`. 12 scénarios avec le vrai Chromium du bot, face à une page Cryptobox simulée. Tous réussis, avec un seul « Réclamer » et au plus un « Ouvrir » à chaque fois :
+  - succès avec montant, y compris avec une fenêtre lente ou la fenêtre des cookies ouverte ;
+  - déjà réclamé, épuisé, code refusé, refus à l'ouverture ;
+  - fenêtre absente, et note trompeuse avec une ouverture sans preuve : résultat « inconnu » ;
+  - réponse tardive d'un ancien code : ignorée ;
+  - session expirée (HTTP 401) : « session à reconnecter » ;
+  - limite atteinte : pause anti-ban.
+- **Sur le téléphone** :
+  - le test manuel avec JJF5L4EC a encaissé 0.0009 SPELL (réponse `grabV2`, fenêtre « Nikko_Op vous a envoyé un Red Packet … 0.0009 SPELL ») ;
+  - avec la nouvelle version, les vrais codes du 09/10/2026 ont été encaissés, chaque fois confirmés par la réponse `grabV2` : J67D686D → 0.00045218 USTC en 5,9 s, XCZME2B7 → 0.00005088 USTC en 7,3 s, 17TEOTG0 → 0.00052167 USTC en 4,8 s. Avant le correctif, une réclamation (ratée) prenait 13 s.
+
+Après une réclamation, la pompe d'images s'arrête bien au bout d'une minute (`pump: au repos` dans le rapport d'état). Le 09/10/2026, juste après le démarrage, la WebView tournait d'elle-même à 55–58 images/s. La chute à 0,7 image/s n'est apparue qu'après des heures de fonctionnement, la nuit. Pour savoir si la pompe suffit dans cet état, surveille la durée « traité en … ms » des logs : vers 5–7 s, tout va bien ; si elle remonte vers 13 s, la pompe ne suffit pas.
+
+---
+
+## 7. Résolu : Telegram coupé 30 à 50 minutes la nuit (HiOS « AI Net »)
+
+**Résolu le 09/10/2026.**
+
+### Le symptôme
+
+La nuit, « 📡 Connexion Telegram perdue — reconnexion automatique… », puis « rétablie » 30 à 50 minutes plus tard, plusieurs fois (03:14 → 03:45, 03:51 → 04:40). Les codes publiés pendant ces trous étaient perdus (« Messages périmés » en hausse).
+
+### Le diagnostic
+
+L'historique Wi-Fi d'Android (`adb shell dumpsys wifi`) montrait, aux mêmes minutes, des ordres d'extinction et de rallumage du Wi-Fi envoyés par le service système de HiOS :
+
+```
+time=10-09 03:14:51.983 … what=CMD_WIFI_TOGGLED 0 … WorkSource{1000 com.transsion.usf}
+time=10-09 03:45:34.243 … what=CMD_WIFI_TOGGLED … WorkSource{1000 com.transsion.usf}
+```
+
+### La cause
+
+La fonction « **AI Net** » de HiOS (optimiseur réseau de nuit, dans `com.transsion.usf`) coupe le Wi-Fi et les données pendant la période de sommeil qu'elle prédit, écran éteint, en les rallumant quelques minutes de temps en temps. Elle ne fait d'exception pour aucune appli. Son interrupteur est le réglage système `ai_net_control_enable` (1 = actif).
+
+### La solution
+
+```bash
+adb shell settings put global ai_net_control_enable 0
+```
+
+HiOS ne relit ce réglage qu'au démarrage : **redémarre le téléphone une fois** après la commande. Le réglage reste ensuite à 0. L'écran **Santé** de l'app signale désormais AI Net s'il redevient actif, par exemple après une mise à jour de HiOS.
+
+**Vérifié le 09/10/2026 après le redémarrage** : le journal de HiOS affiche `Usf_NetOpt/AiNetControllerService: ========= not Support, mUiSwitch: false …`. Pour le revoir :
+
+```bash
+adb shell "logcat -d | grep AiNetControllerService"   # mUiSwitch: false = AI Net coupé
+adb shell settings get global ai_net_control_enable    # 0
+```
+
+---
+
+## 8. Résolu : le bot ne repartait pas après une mise à jour de l'app
+
+**Résolu le 09/10/2026.**
+
+**Le symptôme** : après `adb install -r`, le bot restait arrêté.
+
+**La cause** : HiOS bloque l'annonce « appli mise à jour » (`MY_PACKAGE_REPLACED`) quand l'app n'est pas déjà lancée. Le journal d'Android le montre :
+
+```
+tranpm/BroadcastPolicy: limitScheduleReceiverColdLocked by systemSence - cold: … targetPkg = com.redpacketbot.app
+```
+
+Le gardien (toutes les 15 min) ne relançait qu'après 10 minutes sans signe de vie.
+
+**La solution** :
+- **Ouvrir l'app relance le bot** s'il devrait tourner.
+- **Le gardien relance dès 2 minutes** sans signe de vie, dans les deux cas sauf si tu l'as arrêté ou si une relance est déjà prévue.
+- Après une installation par câble, `adb shell am start -n com.redpacketbot.app/.MainActivity` relance le bot tout de suite.
+
+**Même chose au redémarrage du téléphone** (constaté le 09/10/2026) : HiOS n'a pas transmis `BOOT_COMPLETED` à l'app, qui n'a pas démarré seule.
+- La parade : autoriser le **démarrage automatique** de Red Packet Bot dans Phone Master (écran Santé de l'app, point « Tecno : démarrage automatique »).
+- Sinon, le gardien relance le bot dans les 15 minutes. C'est une tâche planifiée d'Android, conservée au redémarrage, que HiOS ne bloque pas. Ouvrir l'app le relance aussi tout de suite.
+
+---
+
+## 9. Si le bot s'endort de nouveau
 
 Une mise à jour de HiOS peut changer les règles du gel. Dans l'ordre :
 

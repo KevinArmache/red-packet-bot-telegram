@@ -543,7 +543,15 @@ Et pour la pause de 2 h :
 > [!CAUTION]
 > Les sélecteurs de la constante `SELECTORS` dans [`src/binance.js`](./src/binance.js) sont **fonctionnels et validés en production**. Ne les modifie que si Binance change vraiment son interface et que les réclamations échouent.
 
-Ils couvrent : la détection de session (`loggedInIndicators` / `loggedOutIndicators`), le champ de saisie (`codeInput`), le bouton de soumission (`submitButton`), la modale de confirmation (`confirmButton`), la lecture du gain (`successModal`) et le message d'erreur (`errorMessage`).
+Ils couvrent : la détection de session (`loggedInIndicators` / `loggedOutIndicators`), le champ de saisie (`codeInput`), le bouton de soumission (`submitButton`) et le message d'erreur (`errorMessage`).
+
+**Le résultat ne dépend pas de l'écran.** Réclamer un code se fait en deux temps :
+1. « Réclamer » interroge Binance (`…/gift-box/code/query`) : le Red Packet est-il encore à prendre ?
+2. « Ouvrir », dans la fenêtre du Red Packet (constante `OPEN_BUTTON`), l'encaisse (`…/gift-box/code/grabV2`).
+
+Le bot lit les **réponses** de ces deux requêtes : le montant gagné (par exemple « 0.0009 SPELL ») ou le motif du refus. Sans réponse de Binance, le résultat est « inconnu » : jamais un faux « GAGNÉ ».
+
+**Après toute modification de `src/binance.js`**, lance `npm run test:claim`. Le test fait passer la réclamation par 12 scénarios (succès, refus, session expirée, limite anti-ban, fenêtre lente ou absente, réponse d'un ancien code…), avec le vrai Chromium du bot, face à une page Cryptobox simulée : aucune requête ne part vers Binance.
 
 **Pour mettre à jour un sélecteur :**
 
@@ -575,6 +583,7 @@ red-packet-bot-telegram/
 │   ├── app/               # Projet Android Studio (Kotlin) : service, écrans, WebView
 │   ├── node/entry.js      # Démarrage du bot dans l'app (Node.js mobile)
 │   └── scripts/build-apk.mjs  # « npm run apk » : compile l'APK
+├── test/claim-flow.js     # « npm run test:claim » : vérifie la réclamation sur le PC
 ├── GUIDE-ANDROID.md       # Guide de l'app Android
 ├── GUIDE-DEBOGAGE.md      # Déboguer l'app avec Claude (adb) + problèmes résolus
 ├── README.md

@@ -121,29 +121,7 @@ const SELECTORS = {
     '[role="button"]:has-text("Claim")',
   ],
 
-  // Bouton de confirmation dans la modale
-  confirmButton: [
-    'button:has-text("Ouvrir")',
-    'button:has-text("Open")',
-    'button:has-text("Confirmer")',
-    'button:has-text("Confirm")',
-    '[role="button"]:has-text("Ouvrir")',
-    '[role="button"]:has-text("Open")',
-  ],
-
-  // Messages de résultat — sélecteurs de la modale de succès Binance
-  successModal: [
-    '[class*="result"]',
-    '[class*="success"]',
-    '[class*="reward"]',
-    '[class*="amount"]',
-    '[data-testid*="success"]',
-    '[data-testid*="result"]',
-    'div[class*="modal"] [class*="amount"]',
-    'div[class*="modal"] strong',
-    'div[class*="modal"] b',
-  ],
-  // Sélecteurs d'erreur : on les vérifie en dernier
+  // Sélecteurs d'erreur : secours quand l'API n'a pas répondu (voir claimCode)
   errorMessage: '[role="alert"]:visible, [class*="errorMessage"]:visible, [class*="error-message"]:visible, [class*="invalid-tip"]:visible',
 };
 
@@ -372,6 +350,7 @@ async function initBrowser(newHooks = {}) {
     assertCurrent(gen, page);
 
     try {
+      webview?.boost(60000);
       await page.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
     } catch (err) {
       assertCurrent(gen, page);
@@ -483,6 +462,7 @@ async function reloadAfterAppLogin(page) {
   if (!signalled && Date.now() - lastAppReloadAt < APP_LOGIN_RELOAD_MS) return;
   lastAppReloadAt = Date.now();
   if (signalled) logger.info('🔑 Connexion Binance faite dans l\'app — rechargement de la page Cryptobox');
+  webview.boost(45000);
   await page.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => { });
 }
 
@@ -730,6 +710,7 @@ async function passiveLoginCheck() {
       } else {
         const page = await openPage();
         adoptPage(page);
+        webview?.boost(30000);
         await page.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => { });
         return; // vérifié au prochain passage
       }
@@ -758,6 +739,7 @@ async function passiveLoginCheck() {
       appPageSeen++;
       if (appPageSeen >= 2) {
         appPageSeen = 0;
+        webview?.boost(30000);
         await cryptoboxPage
           .goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
           .catch(() => { });
@@ -812,6 +794,176 @@ function getStatus() {
 }
 
 // ─── Réclamation d'un code Cryptobox ────────────────────────────────────────
+//
+// Réclamer un code se fait en deux temps, et ce sont les réponses de l'API de
+// la page qui font foi (la page seule ne dit pas si le Red Packet a été
+// encaissé) :
+//   1. « Réclamer » → POST …/gift-box/code/query : le Red Packet existe-t-il,
+//      est-il épuisé, déjà réclamé par ce compte ?
+//   2. « Ouvrir » (fenêtre du Red Packet) → POST …/gift-box/code/grabV2 :
+//      l'encaissement, avec le montant (grabAmountStr) et la crypto (currency).
+
+const GIFT_QUERY_PATH = '/gift-box/code/query';
+const GIFT_GRAB_PATH = '/gift-box/code/grab';
+const GIFT_QUERY_TIMEOUT_MS = 20000;
+// La fenêtre « Ouvrir » met plusieurs secondes à s'afficher sur le téléphone
+const OPEN_BUTTON_TIMEOUT_MS = 20000;
+const GIFT_GRAB_TIMEOUT_MS = 20000;
+
+// Bouton « Ouvrir » de la fenêtre du Red Packet, et pas d'une autre fenêtre
+// (le centre de préférences des cookies a lui aussi un bouton « Confirmer »)
+const OPEN_BUTTON = [
+  '[role="dialog"]:has-text("Red Packet") button:text-is("Ouvrir")',
+  '[role="dialog"]:has-text("Red Packet") button:text-is("Open")',
+].join(', ');
+
+const CLOSE_SELECTORS = [
+  '[role="dialog"]:has-text("Red Packet") .right-0 svg',
+  '[data-testid="modal-close"]',
+  'svg[color="textIconNormal"]',
+  '.binance-icon-close',
+  'button:has-text("OK")',
+  'svg.text-PrimaryText.cursor-pointer',
+];
+
+/**
+ * Attend la réponse d'une requête Cryptobox pour CE code (la réponse tardive
+ * d'un code précédent est ignorée) : { status, body } ; null si rien n'arrive.
+ */
+function waitGiftResponse(page, pathPart, code, timeout) {
+  return page
+    .waitForResponse((response) => {
+      if (!response.url().includes(pathPart) || response.request().method() !== 'POST') return false;
+      try {
+        return response.request().postDataJSON()?.grabCode === code;
+      } catch (_) {
+        return false;
+      }
+    }, { timeout })
+    .then(async (response) => ({ status: response.status(), body: await response.json().catch(() => null) }))
+    .catch(() => null);
+}
+
+/** Message d'erreur d'une réponse de l'API (code ≠ 000000), ou '' si elle est bonne. */
+function giftError(body) {
+  if (!body || typeof body !== 'object') return '';
+  if (body.code === '000000' && body.success !== false && body.data?.success !== false) return '';
+  return String(body.messageDetail || body.message || `erreur Binance ${body.code ?? 'inconnue'}`);
+}
+
+// Session expirée : l'API répond « connecte-toi » (HTTP 401/403, ou message)
+const LOGIN_ERROR = /\blog ?in\b|login|connecte|session|authent|unauthori[sz]ed|token/i;
+
+function isLoginError(reply) {
+  if (!reply) return false;
+  if (reply.status === 401 || reply.status === 403) return true;
+  return LOGIN_ERROR.test(giftError(reply.body));
+}
+
+/** Preuve positive de l'encaissement dans la réponse d'ouverture. */
+function isGrabSuccess(body) {
+  const data = body?.data;
+  return body?.code === '000000' && Boolean(data) &&
+    (data.success === true || data.grabAmountStr != null || data.grabAmount != null);
+}
+
+/** « 0.0009 SPELL », d'après la réponse d'ouverture. */
+function giftAmount(data) {
+  const amount = data?.grabAmountStr ?? data?.grabAmount;
+  return amount !== undefined && amount !== null && data?.currency ? `${amount} ${data.currency}` : '';
+}
+
+/**
+ * Montant affiché par la fenêtre de RÉSULTAT (« X vous a envoyé un Red Packet
+ * … 0.0009 SPELL ≈ $… »), ou ''. Secours si la réponse de l'API manque.
+ * Jamais l'enveloppe encore fermée (bouton « Ouvrir ») : sa note est écrite
+ * par l'expéditeur et pourrait contenir un faux montant.
+ */
+async function readGainFromPage() {
+  try {
+    const dialogs = await cryptoboxPage.$$eval('[role="dialog"]', (nodes) =>
+      nodes.filter((d) => d.getClientRects().length > 0).map((d) => ({
+        text: d.innerText || '',
+        closed: [...d.querySelectorAll('button')].some((b) => /^\s*(Ouvrir|Open)\s*$/i.test(b.innerText || '')),
+      })));
+    for (const { text, closed } of dialogs) {
+      if (closed || !/vous a envoyé|sent you/i.test(text)) continue;
+      // Le montant précède sa valeur en dollars : « 0.0009 SPELL ≈ $0.00000008 »
+      const beforeUsd = /([0-9]+(?:[.,][0-9]+)?)\s*([A-Z][A-Z0-9]{1,9})\s*≈\s*\$/.exec(text);
+      if (beforeUsd) return `${beforeUsd[1]} ${beforeUsd[2]}`;
+    }
+  } catch (_) { }
+  return '';
+}
+
+/** Message d'erreur visible sur la page, ou ''. */
+async function readErrorFromPage() {
+  try {
+    const errorEl = await cryptoboxPage.$(SELECTORS.errorMessage);
+    if (errorEl && await errorEl.isVisible().catch(() => false)) {
+      return (await errorEl.innerText().catch(() => '')).trim();
+    }
+  } catch (_) { }
+  return '';
+}
+
+/** Ferme la fenêtre du Red Packet (résultat, ou fenêtre restée ouverte). */
+async function closeRedPacketWindow({ escape = true } = {}) {
+  try {
+    const closeBtn = await findFirstVisible(cryptoboxPage, CLOSE_SELECTORS);
+    if (closeBtn) await closeBtn.click(CLICK);
+    else if (escape) await cryptoboxPage.keyboard.press('Escape');
+  } catch (_) { }
+}
+
+const RED_PACKET_WINDOW = '[role="dialog"]:has-text("Red Packet")';
+
+async function isRedPacketWindowOpen() {
+  try {
+    const el = await cryptoboxPage.$(RED_PACKET_WINDOW);
+    return Boolean(el && await el.isVisible());
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Ferme les fenêtres de Red Packet restées ouvertes ; true si aucune ne reste. */
+async function clearRedPacketWindows() {
+  for (let i = 0; i < 2 && await isRedPacketWindowOpen(); i++) {
+    await closeRedPacketWindow();
+    await sleep(500);
+  }
+  return !await isRedPacketWindowOpen();
+}
+
+/** Laisse à la page le temps de renvoyer vers la connexion (session expirée). */
+function waitForLoginRedirect() {
+  return cryptoboxPage
+    .waitForURL((url) => isLoginPage(url.href), { timeout: 3000, waitUntil: 'commit' })
+    .catch(() => { });
+}
+
+/** Code refusé par Binance : message, et pause anti-ban si la limite est atteinte. */
+function claimFailure(code, errorText) {
+  logger.warn(`📭 Code ${code} — ${String(errorText).substring(0, 160)}`);
+
+  // ─── Protection Anti-Ban Binance ─────────────────────────────────────────
+  const lowerError = String(errorText).toLowerCase();
+  if (lowerError.includes('limite') || lowerError.includes('limit') || lowerError.includes('dépassé')) {
+    logger.error(`🚨 ALERTE ANTI-BAN : La limite de Binance a été atteinte.`);
+    logger.warn(`🛑 Le bot se met en pause automatique pour 5 heures.`);
+    startPause(5 * 60 * 60 * 1000);
+    return { remember: false, status: 'rate_limited' };
+  }
+  if (lowerError.includes('tentative') || lowerError.includes('attempt')) {
+    logger.error(`🚨 AVERTISSEMENT ANTI-BAN : Binance signale des tentatives restantes.`);
+    logger.warn(`🛑 Pause de sécurité de 2 heures déclenchée pour réinitialiser le compteur.`);
+    startPause(2 * 60 * 60 * 1000);
+    return { remember: false, status: 'rate_limited' };
+  }
+
+  return { remember: true, status: 'permanent_failure' };
+}
 
 /**
  * @param {string} code
@@ -840,6 +992,9 @@ async function claimCode(code, opts = {}) {
   }
 
   logger.info(`🚀 Réclamation en cours : ${code}`);
+  // Téléphone : images à cadence normale pendant la réclamation (clics et
+  // fenêtres de Binance réactifs, même écran éteint)
+  webview?.boost(60000);
 
   {
     try {
@@ -893,18 +1048,23 @@ async function claimCode(code, opts = {}) {
         return { remember: false, status: 'page_unavailable' };
       }
 
-      // Fermer d'anciennes modales si présentes (au cas où la précédente a laissé des traces)
-      try {
-        const closeSelectors = [
-          '[data-testid="modal-close"]',
-          'svg[color="textIconNormal"]',
-          '.binance-icon-close',
-          'button:has-text("OK")',
-          'svg.text-PrimaryText.cursor-pointer' // Nouveau sélecteur fourni
-        ];
-        const closeBtn = await findFirstVisible(cryptoboxPage, closeSelectors);
-        if (closeBtn) await closeBtn.click(CLICK);
-      } catch (_) { }
+      // Fenêtre d'un Red Packet précédent encore ouverte : on la ferme. Si elle
+      // résiste, rechargement (avant toute saisie : aucune tentative brûlée),
+      // pour ne jamais cliquer le « Ouvrir » d'un autre code.
+      if (!await clearRedPacketWindows()) {
+        logger.warn(`🔄 Fenêtre d'un Red Packet précédent encore ouverte — rechargement (code ${code} pas encore soumis)`);
+        webview?.boost(30000);
+        await cryptoboxPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => { });
+        const ready = await cryptoboxPage
+          .waitForSelector(SELECTORS.codeInput, { state: 'visible', timeout: PAGE_READY_TIMEOUT_MS })
+          .then(() => true)
+          .catch(() => false);
+        if (!ready || await isRedPacketWindowOpen() || !isOnCryptobox(cryptoboxPage.url())) {
+          if (isLoginPage(cryptoboxPage.url())) return loginRequired(code);
+          logger.warn(`⏭️ Code ${code} abandonné — page Cryptobox pas prête (aucun retry)`);
+          return { remember: false, status: 'page_unavailable' };
+        }
+      }
 
       // 4. Dernier contrôle du relais, puis inscription AVANT la saisie
       if (opts.canSubmit && !opts.canSubmit()) {
@@ -917,7 +1077,14 @@ async function claimCode(code, opts = {}) {
       await cryptoboxPage.fill(SELECTORS.codeInput, '');
       await cryptoboxPage.type(SELECTORS.codeInput, code, { delay: 10 });
 
-      // 5. Soumettre
+      // Réponses de l'API Cryptobox, écoutées AVANT le clic : ce sont elles qui
+      // font foi (la page seule ne dit pas si le Red Packet a été encaissé)
+      const queryResponse = waitGiftResponse(cryptoboxPage, GIFT_QUERY_PATH, code, GIFT_QUERY_TIMEOUT_MS);
+      const grabResponse = waitGiftResponse(
+        cryptoboxPage, GIFT_GRAB_PATH, code, GIFT_QUERY_TIMEOUT_MS + OPEN_BUTTON_TIMEOUT_MS + GIFT_GRAB_TIMEOUT_MS,
+      );
+
+      // 5. « Réclamer » (un seul clic) : Binance vérifie le code
       const submitBtn = await findFirstVisible(cryptoboxPage, SELECTORS.submitButton);
       if (submitBtn) {
         await submitBtn.click(CLICK);
@@ -925,115 +1092,73 @@ async function claimCode(code, opts = {}) {
         await cryptoboxPage.keyboard.press('Enter');
       }
 
-      // 6. Modale de confirmation (Ouvrir)
-      await cryptoboxPage.waitForTimeout(500);
-      const confirmBtn = await findFirstVisible(cryptoboxPage, SELECTORS.confirmButton);
-      if (confirmBtn) {
-        await confirmBtn.click(CLICK);
-        await cryptoboxPage.waitForTimeout(1000);
-      } else {
-        for (const sel of SELECTORS.confirmButton) {
-          try {
-            const btn = await cryptoboxPage.waitForSelector(sel, { state: 'visible', timeout: 1000 });
-            if (btn) {
-              await btn.click(CLICK);
-              await cryptoboxPage.waitForTimeout(1000);
-              break;
-            }
-          } catch (_) { }
+      const query = await queryResponse;
+      // Session expirée juste avant la soumission : réponse « connecte-toi »
+      // ou renvoi vers la connexion. Binance n'a pas pris le code en compte.
+      if (isLoginPage(cryptoboxPage.url()) || isLoginError(query)) return loginRequired(code);
+      const queryData = query?.body?.data;
+      if (query?.body) {
+        const queryError = giftError(query.body);
+        if (queryError) {
+          // Une session expirée peut répondre une erreur, puis renvoyer vers la connexion
+          await waitForLoginRedirect();
+          if (isLoginPage(cryptoboxPage.url())) return loginRequired(code);
+          return claimFailure(code, queryError);
         }
+        if (queryData?.grabbed) return claimFailure(code, 'déjà réclamé avec ce compte');
+        if (queryData?.fullyClaimed) return claimFailure(code, 'Red Packet entièrement réclamé');
       }
 
-      // 7. Résultat — attendre que la modale de résultat apparaisse (max 4s)
-      await cryptoboxPage.waitForTimeout(1500);
+      // 6. « Ouvrir » (un seul clic) dans la fenêtre du Red Packet. Elle peut
+      //    mettre plusieurs secondes à s'afficher sur le téléphone.
+      const opened = await Promise.race([
+        cryptoboxPage
+          .waitForSelector(OPEN_BUTTON, { state: 'visible', timeout: OPEN_BUTTON_TIMEOUT_MS })
+          .catch(() => null),
+        grabResponse.then((reply) => (reply ? 'grabbed' : null)),
+      ]);
+      if (opened && opened !== 'grabbed') await opened.click(CLICK);
 
-      // Renvoyé vers la connexion après la soumission : la session venait
-      // d'expirer, Binance n'a pas pris le code en compte.
-      if (isLoginPage(cryptoboxPage.url())) return loginRequired(code);
+      // 7. Résultat : la réponse de « Ouvrir » (grabV2) donne le montant
+      const grab = opened
+        ? await grabResponse
+        : await Promise.race([grabResponse, sleep(2000).then(() => null)]);
+      if (isLoginPage(cryptoboxPage.url()) || isLoginError(grab)) return loginRequired(code);
 
-      // Tenter d'abord de lire le montant depuis la modale de succès
-      let gain = '';
-      try {
-        for (const sel of SELECTORS.successModal) {
-          const els = await cryptoboxPage.$$(sel);
-          for (const el of els) {
-            if (!await el.isVisible().catch(() => false)) continue;
-            const t = (await el.innerText().catch(() => '')).trim();
-            if (!t) continue;
-            const matches = [...t.matchAll(/([0-9]+[.,]?[0-9]*)\s*([A-Z]{2,10})/g)];
-            const valid = matches.filter(
-              (m) => !['H', 'UTC', 'PM', 'AM', 'OK', 'ID', 'FR', 'EN', 'VIP', 'KYC'].includes(m[2])
-            );
-            if (valid.length > 0) {
-              gain = `${valid[0][1]} ${valid[0][2]}`;
-              break;
-            }
-          }
-          if (gain) break;
+      if (grab?.body) {
+        const grabError = giftError(grab.body);
+        if (grabError) {
+          await waitForLoginRedirect();
+          if (isLoginPage(cryptoboxPage.url())) return loginRequired(code);
+          return claimFailure(code, grabError);
         }
-      } catch (_) { }
-
-      // Si pas trouvé via les sélecteurs ciblés, scanner tout le body
-      if (!gain) {
-        try {
-          const bodyText = await cryptoboxPage.innerText('body').catch(() => '');
-          const gainMatches = [...bodyText.matchAll(/([0-9]+[.,]?[0-9]*)\s*([A-Z]{2,10})/g)];
-          const valid = gainMatches.filter(
-            (m) => !['H', 'UTC', 'PM', 'AM', 'OK', 'ID', 'FR', 'EN', 'VIP', 'KYC'].includes(m[2])
-          );
-          if (valid.length > 0) gain = `${valid[0][1]} ${valid[0][2]}`;
-        } catch (_) { }
+        if (isGrabSuccess(grab.body)) {
+          const gain = giftAmount(grab.body.data) || await readGainFromPage();
+          const sender = queryData?.payerNickname ? ` (Red Packet de ${queryData.payerNickname})` : '';
+          logger.success(`💰 GAGNÉ ! Code ${code} → ${gain || 'montant à vérifier sur Binance'}${sender}`);
+          await closeRedPacketWindow();
+          return { remember: true, status: 'success', gain };
+        }
+        // Réponse sans preuve d'encaissement : traitée comme une absence de réponse
       }
 
-      // Vérifier si un vrai message d'erreur est visible
-      let isError = false;
-      let errorText = '';
-      try {
-        const errorEl = await cryptoboxPage.$(SELECTORS.errorMessage);
-        if (errorEl && await errorEl.isVisible().catch(() => false)) {
-          errorText = (await errorEl.innerText().catch(() => '')).trim();
-          if (errorText.length > 0) isError = true;
-        }
-      } catch (_) { }
-
-      if (isError) {
-        logger.warn(`📭 Code ${code} — ${errorText.substring(0, 120)}`);
-
-        // ─── Protection Anti-Ban Binance ─────────────────────────────────────
-        const lowerError = errorText.toLowerCase();
-        if (lowerError.includes('limite') || lowerError.includes('limit') || lowerError.includes('dépassé')) {
-          logger.error(`🚨 ALERTE ANTI-BAN : La limite de Binance a été atteinte.`);
-          logger.warn(`🛑 Le bot se met en pause automatique pour 5 heures.`);
-          startPause(5 * 60 * 60 * 1000);
-          return { remember: false, status: 'rate_limited' };
-        }
-        if (lowerError.includes('tentative') || lowerError.includes('attempt')) {
-          logger.error(`🚨 AVERTISSEMENT ANTI-BAN : Binance signale des tentatives restantes.`);
-          logger.warn(`🛑 Pause de sécurité de 2 heures déclenchée pour réinitialiser le compteur.`);
-          startPause(2 * 60 * 60 * 1000);
-          return { remember: false, status: 'rate_limited' };
-        }
-
-        return { remember: true, status: 'permanent_failure' };
+      // Pas de preuve dans la réponse d'ouverture. Jamais « GAGNÉ » sans preuve :
+      // la fenêtre de résultat ou un message d'erreur, sinon résultat inconnu.
+      const pageGain = await readGainFromPage();
+      if (pageGain) {
+        logger.success(`💰 GAGNÉ ! Code ${code} → ${pageGain}`);
+        await closeRedPacketWindow();
+        return { remember: true, status: 'success', gain: pageGain };
       }
+      const errorText = await readErrorFromPage();
+      if (errorText) return claimFailure(code, errorText);
 
-      logger.success(`💰 GAGNÉ ! Code ${code} → ${gain || 'montant à vérifier sur Binance'}`);
-
-      // On a réussi l'opération, fermer la modale pour le code suivant
-      try {
-        const closeSelectors = [
-          '[data-testid="modal-close"]',
-          'svg[color="textIconNormal"]',
-          '.binance-icon-close',
-          'button:has-text("OK")',
-          'svg.text-PrimaryText.cursor-pointer' // Nouveau sélecteur fourni
-        ];
-        const closeBtn = await findFirstVisible(cryptoboxPage, closeSelectors);
-        if (closeBtn) await closeBtn.click(CLICK);
-      } catch (_) { }
-
-      // Fin heureuse
-      return { remember: true, status: 'success', gain };
+      logger.warn(
+        `❔ Code ${code} — ${opened ? 'Binance n\'a pas confirmé l\'encaissement après « Ouvrir »' : 'fenêtre « Ouvrir » jamais affichée'} : ` +
+          'résultat inconnu, vérifie l\'historique Cryptobox (aucun retry)',
+      );
+      await closeRedPacketWindow();
+      return { remember: true, status: 'unknown' };
 
     } catch (err) {
       // ⛔ Pas de seconde tentative : on remet la page à zéro et on passe au

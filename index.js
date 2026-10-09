@@ -548,6 +548,17 @@ function handleDetectedCode(code, meta = {}) {
           );
           break;
 
+        case "unknown":
+          // Soumis, mais Binance n'a rien confirmé : jamais compté comme gagné
+          stats.bump("codesClaimed");
+          stats.recordClaimDuration(elapsed);
+          notifier.notify(
+            `❔ Code ${code} : résultat inconnu (Binance n'a rien confirmé). ` +
+              "Vérifie l'historique Cryptobox ; si ça se répète, signale-le.",
+            { key: "claim-unknown", cooldownMs: HOUR },
+          );
+          break;
+
         case "deferred":
           leaveToOtherDevice(code, meta.postedAt);
           break;

@@ -9,6 +9,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
@@ -68,6 +70,12 @@ class BotService : Service() {
         private const val TELEGRAM_RETRY_MS = 30 * 60_000L
         private const val FROZEN_AFTER_MS = 5 * 60_000L
         private const val TELEGRAM_DEAF_MS = 30 * 60_000L
+        // Pompe d'images de la WebView de réclamation (voir pumpTick)
+        private const val PUMP_INTERVAL_MS = 33L
+        private const val PUMP_DEFAULT_MS = 30_000L
+        private const val PUMP_MAX_MS = 120_000L
+        private const val PUMP_WIDTH_PX = 64
+        private const val PUMP_HEIGHT_PX = 40
 
         /** Service du processus courant (pour l'écran de connexion Binance, même processus). */
         @Volatile
@@ -140,6 +148,20 @@ class BotService : Service() {
             )
         }
         Status.lastError(state)?.let { out.println("lastError: $it") }
+        // « pump 30000 » : pompe d'images de la WebView pendant 30 s (mesures par
+        // câble). dump() tourne sur le fil principal, comme la pompe.
+        val pumpArg = args?.indexOf("pump") ?: -1
+        if (pumpArg >= 0) {
+            pumpFrames((args?.getOrNull(pumpArg + 1)?.toLongOrNull() ?: PUMP_DEFAULT_MS).coerceIn(0L, PUMP_MAX_MS))
+        }
+        val pumpLeft = pumpUntil - SystemClock.uptimeMillis()
+        out.println(
+            "pump: " + when {
+                claimWebView == null -> "aucune WebView de réclamation"
+                pumpLeft > 0 -> "active encore ${pumpLeft / 1000} s"
+                else -> "au repos"
+            },
+        )
         if (args?.contains("logs") == true) {
             out.println("--- logs/bot.log (fin)")
             lastLogLines(40).forEach(out::println)
@@ -383,6 +405,10 @@ class BotService : Service() {
                 destroyClaimWebView()
                 bridge?.reply(id)
             }
+            "webview.pump" -> main.post {
+                pumpFrames(data.optLong("ms", PUMP_DEFAULT_MS).coerceIn(0L, PUMP_MAX_MS))
+                bridge?.reply(id)
+            }
             "prompt" -> onPrompt(id, data.optString("kind"))
             "event" -> onNodeEvent(data)
             else -> if (id != 0) bridge?.replyError(id, "Commande inconnue : $type")
@@ -486,14 +512,67 @@ class BotService : Service() {
         webView.layout(0, 0, width, height)
         webView.loadUrl(url)
         claimWebView = webView
+        // Chargement de la page Binance : images à cadence normale
+        pumpFrames(PUMP_DEFAULT_MS)
     }
 
     private fun destroyClaimWebView() {
         val webView = claimWebView ?: return
         claimWebView = null
+        pumpUntil = 0L
+        main.removeCallbacks(pumpTick)
         CookieManager.getInstance().flush()
         webView.stopLoading()
         webView.destroy()
+    }
+
+    // ─── Pompe d'images de la WebView de réclamation ───────────────────────
+    //
+    // Jamais affichée, la WebView ne produit d'elle-même qu'une image toutes les
+    // 1 à 2 s (mesuré : 0,7 image/s). Or Chromium attend une image pour traiter
+    // chaque clic (4 s par clic) et pour faire avancer les fenêtres de Binance
+    // (la fenêtre « Ouvrir » arrivait trop tard). Un dessin logiciel dans une
+    // minuscule image force Chromium à produire une image : pendant une
+    // réclamation, on en demande une toutes les 33 ms (environ 30 images/s).
+    // Tout se passe sur le fil principal (dessin d'une vue Android).
+
+    private var pumpCanvas: Canvas? = null
+    @Volatile private var pumpUntil = 0L
+
+    private val pumpTick = object : Runnable {
+        override fun run() {
+            val webView = claimWebView
+            if (webView == null || SystemClock.uptimeMillis() >= pumpUntil) {
+                pumpUntil = 0L
+                return
+            }
+            try {
+                webView.draw(pumpCanvasFor(webView))
+            } catch (e: Exception) {
+                Log.w(TAG, "Pompe d'images : ${e.message}")
+            }
+            main.postDelayed(this, PUMP_INTERVAL_MS)
+        }
+    }
+
+    /** Petite image (64 × 40) qui reçoit toute la page, réduite : dessin peu coûteux. */
+    private fun pumpCanvasFor(webView: WebView): Canvas = pumpCanvas ?: run {
+        val bitmap = Bitmap.createBitmap(PUMP_WIDTH_PX, PUMP_HEIGHT_PX, Bitmap.Config.ARGB_8888)
+        Canvas(bitmap).apply {
+            scale(PUMP_WIDTH_PX / webView.width.coerceAtLeast(1).toFloat(), PUMP_HEIGHT_PX / webView.height.coerceAtLeast(1).toFloat())
+        }.also { pumpCanvas = it }
+    }
+
+    /** Images à cadence normale pendant [durationMs] (prolonge une pompe en cours). Fil principal. */
+    private fun pumpFrames(durationMs: Long) {
+        if (durationMs <= 0 || claimWebView == null) return
+        val idle = pumpUntil == 0L
+        pumpUntil = maxOf(pumpUntil, SystemClock.uptimeMillis() + durationMs)
+        if (idle) {
+            // Une seule boucle, même si une ancienne attend encore son tour
+            main.removeCallbacks(pumpTick)
+            main.post(pumpTick)
+        }
     }
 
     // ─── Surveillance ───────────────────────────────────────────────────────

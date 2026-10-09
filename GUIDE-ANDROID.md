@@ -201,6 +201,7 @@ Ouvre l'onglet **Santé**. Chaque point a un bouton qui ouvre le bon écran des 
 5. **Relance à l'heure exacte** → normalement déjà ✅.
 6. **Heure automatique** → active la date et l'heure automatiques. Le bot compare l'heure du téléphone à celle de Telegram.
 7. **Compatibilité Node.js** → doit être ✅ (voir le [dépannage](#11-dépannage) sinon).
+8. **Tecno : réseau gardé la nuit** (seulement sur HiOS) → doit être ✅. Sinon, la fonction « AI Net » de HiOS coupe le Wi-Fi et les données pendant ton sommeil, et le bot rate les codes. Pour la couper, PC branché en USB : `adb shell settings put global ai_net_control_enable 0`, puis redémarre le téléphone (détails dans le [guide de débogage](GUIDE-DEBOGAGE.md#7-résolu--telegram-coupé-30-à-50-minutes-la-nuit-hios--ai-net-)).
 
 **À faire à la main sur Tecno / HiOS 15 :**
 
@@ -295,11 +296,15 @@ Pense à mettre à jour le PC aussi (`npm install` si besoin, puis `npm start`).
 | **🔑 Binance à reconnecter** souvent | Binance fait expirer ses sessions de temps en temps : reconnecte-toi depuis la notification. Si ça arrive tous les jours, déconnecte-toi de Binance sur les autres appareils inutilisés. |
 | « 💤 Android a endormi le bot » | Un réglage de l'[étape 7](#7-les-réglages-du-téléphone-écran-santé) manque. Vérifie d'abord que la notification **« Bot en marche »** est bien affichée, avec son chronomètre : sans elle, HiOS gèle le bot. Ensuite : batterie sans restriction, démarrage auto et applis protégées dans Phone Master, nettoyage écran verrouillé désactivé. |
 | Beaucoup de **coupures Telegram** | Wi-Fi instable, ou économiseur de données. Garde le Wi-Fi allumé pendant la veille (réglages Wi-Fi avancés) et vérifie l'écran Santé. |
+| **Coupures Telegram de 30 à 50 min la nuit** | C'est HiOS qui éteint le Wi-Fi (fonction « AI Net ») : voir le point 8 de l'[étape 7](#7-les-réglages-du-téléphone-écran-santé). |
+| « ❔ Code … : résultat inconnu » | Binance n'a rien confirmé après « Ouvrir » (réseau coupé, page bloquée). Le code n'est jamais retenté. Regarde l'historique Cryptobox ; si ça se répète, envoie les logs. |
+| « 💰 GAGNÉ » : où voir le montant ? | Dans les logs (« 💰 GAGNÉ ! Code … → 0.0009 SPELL ») et dans l'alerte Telegram, comme sur le PC. Le montant vient directement de la réponse de Binance. |
 | Pas d'alertes Telegram | Envoie **/start** à ton bot d'alertes, vérifie le jeton dans les Réglages, puis **Alerte de test** sur l'Accueil. Les logs expliquent la cause (« Alerte non envoyée : … »). |
 | Notification **▶️ Relancer le bot** | Android a refusé de relancer le bot tout seul (souvent la batterie restreinte). Touche-la, puis **Démarrer**. Vérifie l'écran Santé. |
 | Le bot ne repart pas après un redémarrage du téléphone | Déverrouille le téléphone une fois : Android ne lance aucune app avant. Vérifie le démarrage auto dans Phone Master. |
 | **Compatibilité Node.js ⚠️** (pages de 16 Ko) | Ce téléphone utilise une mémoire en pages de 16 Ko, que Node.js mobile 18 ne gère pas encore. Garde le bot sur le PC (ou un autre téléphone). |
 | L'app se ferme quand le bot redémarre | C'est normal si tu es sur l'écran de connexion Binance pendant une relance : rouvre-le. |
+| Logs trop longs à lire | Onglet **Logs** → **Effacer** : l'écran repart de zéro, le bot continue de tourner. |
 | Autre problème | Onglet **Logs** → **Partager**, et envoie les dernières lignes. Pour une enquête plus poussée, le [guide de débogage](GUIDE-DEBOGAGE.md) explique comment laisser Claude examiner le téléphone par câble USB, et liste les problèmes déjà résolus. |
 
 ---

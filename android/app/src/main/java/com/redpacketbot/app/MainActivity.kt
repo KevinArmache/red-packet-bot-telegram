@@ -66,6 +66,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         handleIntent(intent)
+        // Ouvrir l'app relance le bot s'il devrait tourner (après une mise à jour,
+        // HiOS bloque parfois l'annonce qui le relance d'habitude)
+        ensureBotRunning(this, "ouverture de l'app")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {

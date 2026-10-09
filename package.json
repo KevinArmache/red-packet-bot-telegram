@@ -7,7 +7,8 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "apk": "node android/scripts/build-apk.mjs",
-    "apk:install": "node android/scripts/build-apk.mjs --install"
+    "apk:install": "node android/scripts/build-apk.mjs --install",
+    "test:claim": "node test/claim-flow.js"
   },
   "engines": {
     "node": ">=18.0.0"

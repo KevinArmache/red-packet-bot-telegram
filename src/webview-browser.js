@@ -238,6 +238,20 @@ async function reopenPage(context) {
   return findPage(context, await createWebView());
 }
 
+/**
+ * Images à cadence normale pendant `ms` (réclamation, chargement de page).
+ * Jamais affichée, la WebView ne produit d'elle-même qu'environ une image par
+ * seconde : clics et fenêtres de Binance traînent. L'app la « pompe » alors
+ * (voir la pompe d'images de BotService). Sans attente : n'échoue jamais.
+ */
+function boost(ms) {
+  try {
+    host().request("webview.pump", { ms }, 5_000).catch(() => {});
+  } catch (_) {
+    /* pont indisponible : sans effet */
+  }
+}
+
 /** Ferme la WebView (mémoire libérée) et déconnecte Playwright. */
 async function close() {
   const current = browser;
@@ -253,4 +267,4 @@ async function close() {
   }
 }
 
-module.exports = { open, reopenPage, close, consumeLoginSignal, onGone };
+module.exports = { open, reopenPage, close, consumeLoginSignal, onGone, boost };
