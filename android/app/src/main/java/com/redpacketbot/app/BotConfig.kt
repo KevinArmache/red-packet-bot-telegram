@@ -21,6 +21,11 @@ data class BotConfig(
     val maxMessageAgeS: String = "180",
     val resolveLinkedChats: Boolean = true,
     val debug: Boolean = false,
+    // Anti-blocage Binance (src/antiban.js) : 10 codes faux d'affilée = 5 h de blocage
+    val antibanMode: String = "stop",
+    val antibanSelectiveAt: String = "8",
+    val antibanStopAt: String = "9",
+    val antibanStopResumeH: String = "0",
 ) {
     /** Canaux, un par entrée (virgules ou retours à la ligne acceptés). */
     val channelList: List<String>
@@ -62,6 +67,29 @@ data class BotConfig(
         if (maxMessageAgeS.isNotBlank() && maxMessageAgeS.trim().toIntOrNull() == null) {
             errors += "Fraîcheur max : un nombre de secondes (180 conseillé)."
         }
+        errors += validateAntiban()
+        return errors
+    }
+
+    /** Seuils de l'anti-blocage : le 10e code faux (blocage Binance) n'est jamais permis. */
+    private fun validateAntiban(): List<String> {
+        val errors = mutableListOf<String>()
+        if (antibanMode !in listOf("stop", "light")) errors += "Anti-blocage : « stop » ou « light »."
+        val selective = antibanSelectiveAt.trim().toIntOrNull()
+        if (selective == null || selective !in 0..9) {
+            errors += "Anti-blocage : codes clairs à partir de 0 à 9 codes faux (0 = jamais)."
+        }
+        if (antibanMode == "stop") {
+            val stop = antibanStopAt.trim().toIntOrNull()
+            val min = maxOf(1, selective ?: 1)
+            if (stop == null || stop !in min..9) {
+                errors += "Anti-blocage : arrêt entre $min et 9 codes faux (jamais 10 : c'est le blocage)."
+            }
+            val resume = antibanStopResumeH.trim().toIntOrNull()
+            if (resume == null || resume !in 0..168) {
+                errors += "Anti-blocage : reprise automatique entre 0 et 168 h (0 = #reprendre)."
+            }
+        }
         return errors
     }
 
@@ -92,6 +120,10 @@ data class BotConfig(
         put("MAX_MESSAGE_AGE_S", maxMessageAgeS.trim().ifEmpty { "180" })
         put("RESOLVE_LINKED_CHATS", resolveLinkedChats.toString())
         put("DEBUG", debug.toString())
+        put("ANTIBAN_MODE", antibanMode)
+        put("ANTIBAN_SELECTIVE_AT", antibanSelectiveAt.trim().ifEmpty { "8" })
+        put("ANTIBAN_STOP_AT", antibanStopAt.trim().ifEmpty { "9" })
+        put("ANTIBAN_STOP_RESUME_H", antibanStopResumeH.trim().ifEmpty { "0" })
     }
 
     fun toJson(): JSONObject = JSONObject().apply {
@@ -108,6 +140,10 @@ data class BotConfig(
         put("maxMessageAgeS", maxMessageAgeS)
         put("resolveLinkedChats", resolveLinkedChats)
         put("debug", debug)
+        put("antibanMode", antibanMode)
+        put("antibanSelectiveAt", antibanSelectiveAt)
+        put("antibanStopAt", antibanStopAt)
+        put("antibanStopResumeH", antibanStopResumeH)
     }
 
     fun save(file: File) = file.writeTextAtomic(toJson().toString(2))
@@ -131,6 +167,10 @@ data class BotConfig(
             resolveLinkedChats = env["RESOLVE_LINKED_CHATS"]?.let { it.trim().lowercase() != "false" }
                 ?: resolveLinkedChats,
             debug = env["DEBUG"]?.let { it.trim().lowercase() == "true" } ?: debug,
+            antibanMode = pick("ANTIBAN_MODE", antibanMode).trim().lowercase(),
+            antibanSelectiveAt = pick("ANTIBAN_SELECTIVE_AT", antibanSelectiveAt),
+            antibanStopAt = pick("ANTIBAN_STOP_AT", antibanStopAt),
+            antibanStopResumeH = pick("ANTIBAN_STOP_RESUME_H", antibanStopResumeH),
         )
     }
 
@@ -171,6 +211,10 @@ data class BotConfig(
             maxMessageAgeS = o.optString("maxMessageAgeS", "180"),
             resolveLinkedChats = o.optBoolean("resolveLinkedChats", true),
             debug = o.optBoolean("debug", false),
+            antibanMode = o.optString("antibanMode", "stop"),
+            antibanSelectiveAt = o.optString("antibanSelectiveAt", "8"),
+            antibanStopAt = o.optString("antibanStopAt", "9"),
+            antibanStopResumeH = o.optString("antibanStopResumeH", "0"),
         )
 
         /** Lecture d'un fichier .env : CLÉ=valeur, commentaires #, guillemets. */

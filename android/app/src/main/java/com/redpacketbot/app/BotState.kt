@@ -49,6 +49,10 @@ class Heartbeat(private val values: Map<String, String>, val writtenAt: Long) {
     val disconnects get() = values["disconnects"]?.toIntOrNull() ?: 0
     val messages get() = values["messages"]?.toIntOrNull() ?: 0
     val pauseUntil get() = values["pause_until"]?.toLongOrNull() ?: 0L
+    /** Anti-blocage : normal, selective (codes clairs seulement), halt (⛔) ou lock (blocage Binance). */
+    val antiban get() = values["antiban"] ?: "normal"
+    /** Codes faux d'affilée (Binance bloque au 10e). */
+    val fails get() = values["fails"]?.toIntOrNull() ?: 0
     val startedAt get() = values["started_at"]?.toLongOrNull() ?: 0L
     /** Telegram répond (vérification toutes les 3 min dans le bot). */
     val telegramOk get() = values["tg_ok"] != "0"

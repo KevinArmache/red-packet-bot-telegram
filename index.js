@@ -26,6 +26,7 @@ const history = require("./src/history");
 const queue = require("./src/queue");
 const notifier = require("./src/notifier");
 const relay = require("./src/relay");
+const antiban = require("./src/antiban");
 const { hints, ANDROID_APP } = require("./src/platform");
 const binance = require("./src/binance");
 const { startTelegramClient, loginTelegram, isAuthDeadError } = require("./src/telegram");
@@ -87,7 +88,7 @@ function parseTargetChannels() {
 // ─── Bilan périodique ────────────────────────────────────────────────────────
 
 function printStats(title = "📊 Bilan d'activité") {
-  const { rows } = stats.snapshot(relay.statsRows());
+  const { rows } = stats.snapshot([...antiban.statsRows(), ...relay.statsRows()]);
   logger.blank();
   logger.table(title, rows, logger.colors.cyan);
   logger.blank();
@@ -109,10 +110,12 @@ function scheduleDailyReset() {
     // Bilan quotidien : sert aussi de signe de vie (pas de message = problème)
     const s = stats.state;
     const where = relay.ROLE === "backup" ? ` — ${relay.describeMode()}` : "";
+    const guarded = s.codesGuarded ? `, ${s.codesGuarded} sauté(s) par l'anti-blocage` : "";
     notifier.notify(
       `📊 Bilan (en ligne depuis ${stats.formatDuration(Date.now() - s.startedAt)}) : ` +
         `${s.codesDetected} code(s) détecté(s), ${s.codesWon} gagné(s), ` +
-        `${s.codesFailed} échec(s)${where}.`,
+        `${s.codesFailed} échec(s)${guarded}${where}. ` +
+        `🛡️ ${antiban.heartbeatFields().fails} code(s) faux d'affilée.`,
       { level: "all" },
     );
   });
@@ -134,6 +137,7 @@ function writeHeartbeat() {
   // La santé de Telegram est un champ à part (tg_ok), avec son propre seuil.
   if (!HEARTBEAT_FILE) return;
   const s = binance.getStatus();
+  const guard = antiban.heartbeatFields();
   const browser = s.awaitingLogin
     ? "login"
     : s.ready
@@ -147,6 +151,8 @@ function writeHeartbeat() {
     `mode=${relay.currentMode()}`,
     `browser=${browser}`,
     `pause_until=${s.pauseUntil}`,
+    `antiban=${guard.antiban}`,
+    `fails=${guard.fails}`,
     `detected=${stats.state.codesDetected}`,
     `won=${stats.state.codesWon}`,
     `last_code_at=${stats.state.lastCodeAt}`,
@@ -292,15 +298,72 @@ const browserHooks = {
     });
   },
   onUnexpectedClose: (reason, context) => onBrowserLost(reason, context),
-  onPause: (until) => {
+  onPause: (until, reason) => {
+    antiban.noteLock(until, reason);
     relay.announcePause(until);
     notifier.notify(
-      `🛑 Limite Binance atteinte — pause anti-ban jusqu'à ${fmtTime(until)}. ` +
-        "Aucun code ne sera tenté d'ici là.",
+      reason === "captcha"
+        ? `🧩 Binance demande un captcha — pause jusqu'à ${fmtTime(until)}. ` +
+            "Sur le PC, tu peux le résoudre dans la fenêtre Binance du bot."
+        : `🛑 Blocage Binance (Red Packets verrouillés) — pause jusqu'à ${fmtTime(until)}. ` +
+            "Aucun code ne sera tenté d'ici là, sur aucun appareil.",
       { key: "binance-pause", cooldownMs: HOUR },
     );
   },
 };
+
+// ─── Anti-blocage : alertes et commande #reprendre ──────────────────────────
+
+/** Changement de niveau ou remise à zéro observée (src/antiban.js). */
+function onAntibanChange(event) {
+  if (event.type === "reset") {
+    const text = antiban.describeReset(event);
+    logger.info(`🔄 Compteur Binance ${text}`);
+    notifier.notify(`🔄 Compteur Binance ${text}. Utile pour régler ANTIBAN_STOP_RESUME_H.`, {
+      level: "all",
+      key: "antiban-reset",
+      cooldownMs: 6 * HOUR,
+    });
+    return;
+  }
+
+  relay.announceAntiban();
+  writeHeartbeat();
+  if (event.level === "halt") {
+    notifier.notify(
+      `⛔ ${event.fails} codes faux d'affilée : plus que ${event.remaining} essai(s) avant le blocage ` +
+        "Binance de 5 h. Le bot ne tape plus aucun code (PC et téléphone). Pour reprendre : réclame " +
+        "toi-même dans l'app Binance un code qui marche, puis envoie #reprendre dans tes Messages enregistrés.",
+      { key: "antiban-halt", cooldownMs: HOUR },
+    );
+  } else if (event.level === "selective") {
+    notifier.notify(
+      `🟠 ${event.fails} codes faux d'affilée (${event.remaining} essais avant le blocage Binance) : ` +
+        "le bot ne tape plus que les codes clairs (monospace, lien Cryptobox, « Code : ») " +
+        "jusqu'au prochain code qui marche.",
+      { key: "antiban-selective", cooldownMs: HOUR },
+    );
+  }
+}
+
+/** « #reprendre » tapé dans les Messages enregistrés (PC ou téléphone). */
+function onResumeCommand() {
+  const { lockedUntil } = antiban.resume();
+  if (lockedUntil) {
+    logger.warn(`🛡️ #reprendre reçu, mais Binance bloque jusqu'à ${fmtTime(lockedUntil)} — reprise à cette heure-là`);
+    notifier.notify(
+      `⏳ #reprendre reçu, mais le blocage Binance dure jusqu'à ${fmtTime(lockedUntil)} : ` +
+        "le bot reprendra tout seul à cette heure-là.",
+      { key: "antiban-resume" },
+    );
+    return;
+  }
+  logger.success("✅ #reprendre : compteur anti-blocage remis à zéro — tous les codes sont de nouveau réclamés");
+  relay.announceAntiban();
+  notifier.notify("✅ Reprise : compteur anti-blocage remis à zéro, tous les codes sont de nouveau réclamés.", {
+    key: "antiban-resume",
+  });
+}
 
 // Lancements / fermetures du navigateur : un seul à la fois
 let browserChain = Promise.resolve();
@@ -496,6 +559,17 @@ function handleDetectedCode(code, meta = {}) {
       logger.warn(`⏱️ Code ${code} — ${waitedMs} ms d'attente avant traitement`);
     }
 
+    // Anti-blocage : décidé juste avant la saisie, avec le compteur à jour
+    // (les codes déjà en file sont réévalués). Un code sauté n'est pas
+    // mémorisé : republié plus tard, il sera réexaminé.
+    const verdict = antiban.decide(meta);
+    if (!verdict.ok) {
+      stats.bump("codesGuarded");
+      logger.warn(`🛡️ Code ${code} sauté — ${verdict.why}`);
+      history.clearProcessing(code);
+      return;
+    }
+
     const startedAt = Date.now();
     try {
       const result = await binance.claimCode(code, {
@@ -509,6 +583,8 @@ function handleDetectedCode(code, meta = {}) {
         },
       });
       const elapsed = Date.now() - startedAt;
+      // Compteur de codes faux d'affilée (recalé sur le chiffre de Binance)
+      antiban.record(result);
 
       switch (result.status) {
         case "success":
@@ -537,7 +613,9 @@ function handleDetectedCode(code, meta = {}) {
           // L'alerte et le partage de la pause sont faits par browserHooks.onPause
           stats.bump("codesClaimed");
           stats.recordClaimDuration(elapsed);
-          logger.warn(`🛑 Code ${code} — limite Binance atteinte, bot en pause`);
+          logger.warn(
+            `🛑 Code ${code} — ${result.reason === "captcha" ? "captcha demandé" : "blocage Binance"}, bot en pause`,
+          );
           break;
 
         case "temporary_failure":
@@ -739,8 +817,19 @@ async function main() {
   logger.info(`🤝 Rôle : ${relay.describeRole()}`);
   logger.info(`🔔 Alertes : ${notifier.describe()}`);
 
-  // 2. Historique
+  // 2. Historique et anti-blocage (compteur, arrêt ⛔ et blocage Binance en
+  //    cours survivent aux redémarrages)
   history.loadHistory();
+  antiban.setHooks({ onChange: onAntibanChange });
+  const saved = antiban.init();
+  if (saved.pauseUntil > Date.now()) {
+    binance.setPauseUntil(saved.pauseUntil);
+    logger.warn(`🛑 Blocage Binance toujours en cours — aucun code avant ${fmtTime(saved.pauseUntil)}`);
+  }
+  logger.info(`🛡️ Anti-blocage : ${antiban.describe()}`);
+  if (antiban.level() === "halt") {
+    logger.warn("⛔ Arrêt anti-blocage toujours actif — envoie #reprendre dans tes Messages enregistrés");
+  }
 
   // 3. Canaux cibles
   const targetChannels = parseTargetChannels();
@@ -764,7 +853,13 @@ async function main() {
   logger.blank();
   logger.rule("📡 Telegram");
   const { tg } = await startTelegramClient(targetChannels, handleDetectedCode, {
-    onSelfMessage: (msg) => relay.handleSelfMessage(msg),
+    onSelfMessage: (msg, isEdit) => {
+      if (!isEdit && antiban.isResumeCommand(msg)) {
+        onResumeCommand();
+        return;
+      }
+      relay.handleSelfMessage(msg);
+    },
     onConnectionState: (state) => relay.setConnectionState(state),
     onAuthenticated: async (client, me) => {
       telegram = client;
@@ -782,6 +877,7 @@ async function main() {
         onStandby: onRelayStandby,
         onPeerCodes,
         onSharedPause: (until, fromRole) => {
+          antiban.notePause(until);
           if (binance.setPauseUntil(until)) {
             logger.warn(
               `🛑 Pause anti-ban partagée par ${fromRole === "primary" ? "le PC" : "le téléphone"} ` +
@@ -789,6 +885,8 @@ async function main() {
             );
           }
         },
+        getAntiban: () => antiban.exportState(),
+        onPeerAntiban: (state) => antiban.mergePeer(state),
       });
       logger.blank();
       logger.rule("📡 Canaux");

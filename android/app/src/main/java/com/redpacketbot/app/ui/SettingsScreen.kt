@@ -124,6 +124,36 @@ fun SettingsScreen(importedEnv: MutableState<String?>) {
             Hint("⚠️ Seulement si aucun bot ne tourne sur le PC : sinon les deux réclameraient chaque code.")
         }
 
+        Section("🛡️ Anti-blocage Binance") {
+            Hint(
+                "Binance bloque les Red Packets 5 h après 10 codes faux d'affilée. Le bot compte ces " +
+                    "codes et agit avant. Code clair = publié en monospace, dans un lien Cryptobox ou après « Code : ».",
+            )
+            Choice("Garde-fou + arrêt ⛔ (recommandé)", config.antibanMode == "stop") {
+                config = config.copy(antibanMode = "stop")
+            }
+            Hint("Codes clairs seulement au premier seuil, puis plus aucun code au second : le bot ne tape jamais le 10e code faux.")
+            Choice("Garde-fou léger seul", config.antibanMode == "light") {
+                config = config.copy(antibanMode = "light")
+            }
+            Hint("Codes clairs seulement au seuil, sans arrêt : le blocage de 5 h reste possible.")
+            Field("Codes clairs seulement à partir de … codes faux (0 = jamais)", config.antibanSelectiveAt, KeyboardType.Number) {
+                config = config.copy(antibanSelectiveAt = it)
+            }
+            if (config.antibanMode == "stop") {
+                Field("Arrêt total à partir de … codes faux (9 max)", config.antibanStopAt, KeyboardType.Number) {
+                    config = config.copy(antibanStopAt = it)
+                }
+                Field("Reprise auto après l'arrêt, en heures (0 = manuelle)", config.antibanStopResumeH, KeyboardType.Number) {
+                    config = config.copy(antibanStopResumeH = it)
+                }
+                Hint(
+                    "Reprise manuelle : réclame toi-même un code qui marche dans l'app Binance, puis envoie " +
+                        "#reprendre dans tes Messages enregistrés Telegram.",
+                )
+            }
+        }
+
         TextButton(onClick = { advanced = !advanced }) {
             Text(if (advanced) "▲ Masquer les options avancées" else "▼ Options avancées")
         }

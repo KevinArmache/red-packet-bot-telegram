@@ -29,6 +29,7 @@ object Status {
         val title = when {
             heartbeat.browser == "login" -> "🔑 Binance à reconnecter"
             paused -> "🛑 Pause anti-ban"
+            heartbeat.antiban == "halt" -> "⛔ Arrêt anti-blocage"
             heartbeat.mode == "standby" -> "😴 En veille — le PC réclame"
             heartbeat.mode == "checking" -> "🔎 Vérification du relais…"
             heartbeat.mode == "active" && heartbeat.browser == "starting" -> "⏳ Ouverture de Binance…"
@@ -37,6 +38,10 @@ object Status {
         }
         val parts = mutableListOf("🎁 ${heartbeat.detected} code(s)", "💰 ${heartbeat.won} gagné(s)")
         if (paused) parts += "reprise à ${time(heartbeat.pauseUntil)}"
+        when (heartbeat.antiban) {
+            "halt" -> parts += "${heartbeat.fails} faux d'affilée : envoie #reprendre sur Telegram"
+            "selective" -> parts += "🟠 codes clairs seulement (${heartbeat.fails} faux d'affilée)"
+        }
         return title to parts.joinToString(" · ")
     }
 

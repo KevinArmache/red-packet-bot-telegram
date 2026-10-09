@@ -14,7 +14,8 @@ Ce guide sert quand l'app **Red Packet Bot** se comporte mal sur le téléphone.
 6. [Résolu : « GAGNÉ » dans les logs, mais rien d'encaissé sur Cryptobox (téléphone)](#6-résolu--gagné-dans-les-logs-mais-rien-dencaissé-sur-cryptobox-téléphone)
 7. [Résolu : Telegram coupé 30 à 50 minutes la nuit (HiOS « AI Net »)](#7-résolu--telegram-coupé-30-à-50-minutes-la-nuit-hios--ai-net-)
 8. [Résolu : le bot ne repartait pas après une mise à jour de l'app](#8-résolu--le-bot-ne-repartait-pas-après-une-mise-à-jour-de-lapp)
-9. [Si le bot s'endort de nouveau](#9-si-le-bot-sendort-de-nouveau)
+9. [Résolu : pauses anti-ban de 2 h plusieurs fois par jour](#9-résolu--pauses-anti-ban-de-2-h-plusieurs-fois-par-jour)
+10. [Si le bot s'endort de nouveau](#10-si-le-bot-sendort-de-nouveau)
 
 ---
 
@@ -386,7 +387,62 @@ Le gardien (toutes les 15 min) ne relançait qu'après 10 minutes sans signe de 
 
 ---
 
-## 9. Si le bot s'endort de nouveau
+## 9. Résolu : pauses anti-ban de 2 h plusieurs fois par jour
+
+**Résolu le 09/10/2026.**
+
+### Le symptôme
+
+Le bot s'arrêtait de réclamer **2 heures, plusieurs fois par jour**, avec dans les logs :
+
+```
+🚨 AVERTISSEMENT ANTI-BAN : Binance signale des tentatives restantes.
+🛑 Pause de sécurité de 2 heures déclenchée pour réinitialiser le compteur.
+```
+
+### Le diagnostic
+
+- **La règle de Binance**, lue dans sa FAQ officielle (« How to Create and Claim Red Packets on Binance? », mise à jour le 04/06/2026, versions EN, FR et ZH) : « votre compte sera verrouillé pendant 5 heures après 10 tentatives de saisie de code de Red Packet erronées **consécutives** ». Pas de limite de réclamations par jour. Aucune remise à zéro avec le temps n'est publiée.
+- **Aucune vérification d'un code sans le soumettre.** La FAQ et les bots open source (GitHub) n'en montrent aucune : le clic « Réclamer » (`code/query`) est la seule vérification, et c'est lui qui compte les codes faux.
+- **Les codes d'erreur de `code/query`**, relevés dans plusieurs bots open source (non officiels) :
+
+  | Code | Signification |
+  |---|---|
+  | `PAY4001COM000`, `403803`, `403804` | code invalide |
+  | `403802` | Red Packet épuisé |
+  | `403067` | blocage (durée dans le message) |
+  | `100002001` | session expirée |
+  | `data.validateId` | captcha |
+
+### La cause
+
+C'était le bot qui se bloquait, pas Binance : `claimFailure` (`src/binance.js`) se mettait en pause 2 h dès que le refus contenait « tentative » ou « attempt ». Or ce message dit justement qu'il **reste** des essais avant le blocage.
+
+### La solution
+
+- **Les refus de Binance sont lus en détail** (`classifyRefusal`, `parseRemaining`, `parseLockMs` dans `src/binance.js`) :
+  - nature du refus (code d'erreur d'abord, texte FR/EN en secours) ;
+  - nombre d'essais restants ;
+  - durée d'un vrai blocage.
+- **Pause seulement sur un vrai blocage** (durée annoncée, 5 h par défaut) ou un captcha (1 h). Plus jamais sur un simple avertissement.
+- **Nouveau module `src/antiban.js`** : il compte les codes faux d'affilée (recalé sur le chiffre de Binance) et protège selon `ANTIBAN_MODE` :
+  - `stop` (défaut) : codes clairs seulement à 8, plus aucun code à 9 ;
+  - `light` : codes clairs seulement à 8, sans arrêt.
+- **État gardé et partagé** : `.run/antiban.json` (redémarrages) et jetons `fails= failsAt= halt=` du message `#botrelay` (PC ⇄ téléphone).
+- **`#reprendre`** dans les Messages enregistrés : sortie de l'arrêt ⛔.
+- **Réglages** dans le `.env` et dans l'app : **Réglages → 🛡️ Anti-blocage Binance**.
+
+### La vérification
+
+- `npm run test:guard` : 96 vérifications (refus, compteur, modes, `#reprendre`, relais, sources des codes).
+- `npm run test:claim` : 17 scénarios avec le vrai Chromium, dont :
+  - « il vous reste 7 tentatives » → aucune pause ;
+  - `403067` → pause lue dans le message.
+- **À surveiller au premier code refusé** : la ligne `📭 Code X — [code] texte · N essai(s) restant(s)`. Si `N` n'apparaît pas alors que Binance l'affiche, il faut adapter `parseRemaining` au texte exact.
+
+---
+
+## 10. Si le bot s'endort de nouveau
 
 Une mise à jour de HiOS peut changer les règles du gel. Dans l'ordre :
 

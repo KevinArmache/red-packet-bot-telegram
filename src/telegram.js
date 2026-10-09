@@ -187,7 +187,9 @@ const VOWELS = /[AEIOUY]/g;
 function isPlausibleCode(code, relaxed) {
   if (code.length !== 8) return false;
   if (!/^[A-Z0-9]{8}$/.test(code)) return false;
-  if (code.startsWith("BP")) return false; // Comportement historique conservé
+  // Codes « BP… » ignorés, volontairement : les vrais font 10 caractères (BP +
+  // 8, jamais détectés ici), et un « BP » de 8 caractères est un code coupé.
+  if (code.startsWith("BP")) return false;
   if (/^[0-9]{8}$/.test(code)) return false; // 8 chiffres = date / identifiant
 
   const hasLetter = /[A-Z]/.test(code);
@@ -206,8 +208,16 @@ function isPlausibleCode(code, relaxed) {
 
 /**
  * Extrait les codes d'un message pré-découpé en sources.
+ *
+ * Chaque code garde la source la plus sûre où il a été trouvé : « monospace »,
+ * « lien » (URL Cryptobox) et « label » (« Code : XXXXXXXX ») sont des codes
+ * CLAIRS ; « texte » vient du texte libre, d'où sortent la plupart des faux
+ * codes. L'anti-blocage (src/antiban.js) s'en sert quand la marge d'essais
+ * Binance devient faible.
+ *
  * @param {{ plain: string, trusted: string[] }} sources
- * @returns {string[]} Codes uniques, jamais encore traités.
+ * @returns {{ code: string, source: 'monospace'|'lien'|'label'|'texte' }[]}
+ *   Codes uniques, jamais encore traités.
  */
 function extractCodes(sources) {
   const plain = sources.plain;
@@ -218,33 +228,34 @@ function extractCodes(sources) {
     return [];
   }
 
-  const found = new Set();
+  /** code → source (la première trouvée est la plus sûre) */
+  const found = new Map();
 
-  const add = (candidate, relaxed) => {
+  const add = (candidate, relaxed, source) => {
     const code = candidate.toUpperCase();
     if (!isPlausibleCode(code, relaxed)) return;
     if (hasCode(code)) return;
-    found.add(code);
+    if (!found.has(code)) found.set(code, source);
   };
 
   // 1. Sources de confiance (monospace, boutons cryptobox…) — niveau souple
   for (const segment of sources.trusted) {
     for (const m of segment.toUpperCase().matchAll(RE_RELAXED)) {
-      add(m[0], true);
+      add(m[0], true, "monospace");
     }
   }
 
   // 2. URLs cryptobox explicites — niveau souple
-  for (const m of plain.matchAll(RE_URL_PATH)) add(m[1], true);
-  for (const m of plain.matchAll(RE_URL_PARAM)) add(m[1], true);
+  for (const m of plain.matchAll(RE_URL_PATH)) add(m[1], true, "lien");
+  for (const m of plain.matchAll(RE_URL_PARAM)) add(m[1], true, "lien");
 
   // 3. Codes explicitement étiquetés « Code : XXXXXXXX » — niveau souple
-  for (const m of plain.matchAll(RE_LABELLED)) add(m[1], true);
+  for (const m of plain.matchAll(RE_LABELLED)) add(m[1], true, "label");
 
   // 4. Texte libre — niveau strict (lettres + chiffres obligatoires)
-  for (const m of plain.toUpperCase().matchAll(RE_STRICT)) add(m[0], false);
+  for (const m of plain.toUpperCase().matchAll(RE_STRICT)) add(m[0], false, "texte");
 
-  return [...found];
+  return [...found].map(([code, source]) => ({ code, source }));
 }
 
 /**
@@ -712,7 +723,7 @@ async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
       // ── Envoi immédiat des codes trouvés ───────────────────────────────
       // Aucun délai artificiel : la lecture est passive côté Telegram (aucun
       // risque de ban) et chaque milliseconde compte face aux autres bots.
-      for (const code of codes) {
+      for (const { code, source } of codes) {
         if (hasCode(code) || isProcessing(code)) {
           stats.bump("codesDuplicate");
           continue;
@@ -723,15 +734,18 @@ async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
         stats.state.lastCodeAt = Date.now();
 
         logger.success(
-          `🎁 Code trouvé : ${code} — depuis ${channelName}${isEdit ? " (édition)" : ""}`,
+          `🎁 Code trouvé : ${code} — depuis ${channelName}${isEdit ? " (édition)" : ""}` +
+            (source === "texte" ? " · texte libre" : ""),
         );
         // postedAt : heure SERVEUR Telegram de la publication (ou de
         // l'édition) — le relais PC ⇄ téléphone s'en sert pour décider quel
         // appareil est responsable du code, sans dépendre des horloges locales.
+        // source : où le code a été trouvé (codes clairs ou texte libre).
         onCodeFound(code, {
           channel: channelName,
           detectedAt: Date.now(),
           postedAt: stampMs,
+          source,
         });
       }
     } catch (err) {

@@ -36,7 +36,7 @@
 - **⚡ Détection instantanée** — chaque message est analysé dès qu'il arrive, sans délai artificiel ni attente sur le chemin critique.
 - **🎯 Toutes les surfaces d'un message** — texte, légendes, boutons inline, liens masqués, blocs `monospace`, aperçus de lien, messages édités.
 - **📡 100+ canaux sans angle mort** — écoute active avant même la résolution des canaux, résolution groupée, canaux adoptés à la volée, groupes de discussion liés.
-- **🛡️ Protections anti-ban** — une seule soumission par code, un code à la fois, anti-doublons 48 h, pauses automatiques de 5 h ou 2 h, navigateur furtif, session Binance expirée détectée sans jamais taper un code au mauvais endroit.
+- **🛡️ Protections anti-ban** — une seule soumission par code, un code à la fois, anti-doublons 48 h, **anti-blocage** (le bot compte les codes faux d'affilée et ne tape jamais le 10e, qui bloquerait les Red Packets 5 h), pause seulement sur un vrai blocage Binance, navigateur furtif, session Binance expirée détectée sans jamais taper un code au mauvais endroit.
 - **🔔 Alertes qui sonnent vraiment** — via ton propre bot Telegram (@BotFather) : gains, reconnexions à faire, pauses, plantages, bilan quotidien.
 - **🤝 Relais PC ⇄ téléphone** — le PC a la priorité, le téléphone prend le relais dès que le PC s'arrête. Un seul appareil réclame à la fois, pour ne pas soumettre deux fois le même code.
 - **📱 App Android 24/7** — une APK fabriquée en une commande (`npm run apk`), réglages et connexions dans l'app (Binance en plein écran), service permanent, relance automatique (plantage, redémarrage du téléphone, mise à jour).
@@ -274,8 +274,14 @@ Un message que tu t'envoies dans tes Messages enregistrés **ne sonne jamais**. 
   → Rien à faire.
 - **🔑 « Session Telegram expirée : ouvre l'app Red Packet Bot → « Connexion Telegram » »** (téléphone) ou **« … refais la connexion avec « node index.js --setup » »** (serveur) — 1 toutes les 3 h au plus.\
   → Téléphone : écran **Connexion Telegram** de l'app → **Se reconnecter**. Serveur : refais la connexion à la main. En attendant, le superviseur réessaie toutes les 30 min. Cette alerte n'existe qu'en mode sans surveillance (app Android, ou serveur avec `BOT_UNATTENDED=1`).
-- **🛑 « Limite Binance atteinte — pause anti-ban jusqu'à HH:MM… »** — 1 par heure au plus.\
-  → Rien : la pause (5 h ou 2 h) est automatique et partagée avec l'autre appareil. Si ça revient souvent, retire des canaux peu rentables.
+- **🛑 « Blocage Binance (Red Packets verrouillés) — pause jusqu'à HH:MM… »** — 1 par heure au plus.\
+  → Rien : la pause dure ce que Binance annonce (5 h par défaut) et elle est partagée avec l'autre appareil. Ça ne devrait plus arriver en mode `stop` (voir [Anti-blocage](#anti-blocage-binance)).
+- **🧩 « Binance demande un captcha — pause jusqu'à HH:MM… »** — 1 par heure au plus.\
+  → Sur le PC, résous le captcha dans la fenêtre Binance du bot. Sinon, le bot réessaie après 1 h.
+- **🟠 « N codes faux d'affilée… le bot ne tape plus que les codes clairs… »** — 1 par heure au plus.\
+  → Rien : un code qui marche remet le compteur à zéro. Si ça revient souvent, retire les canaux qui publient des codes faux.
+- **⛔ « N codes faux d'affilée : plus que 1 essai avant le blocage… »** — 1 par heure au plus.\
+  → Réclame toi-même dans l'app Binance un code qui marche, puis envoie **`#reprendre`** dans tes « Messages enregistrés » Telegram (réponse ✅ « Reprise… »).
 - **🌐 « Chromium s'est fermé — relance automatique du navigateur… »** (ou « l'onglet Binance a planté… ») — 1 toutes les 10 min au plus.\
   → Rien : le navigateur est relancé tout seul. Au-delà de 3 plantages en 10 min, le bot s'arrête (alerte 💥).
 - **💥 « Chromium plante en boucle… », « navigateur impossible à (re)lancer… » ou « Erreur fatale : … »** — 1 toutes les 15 min au plus, pour l'ensemble.\
@@ -292,7 +298,8 @@ Un message que tu t'envoies dans tes Messages enregistrés **ne sonne jamais**. 
 - **💰 « Gagné ! Code X → montant (canal) »** — à chaque gain.
 - **🟢 « Bot en ligne. »** — au démarrage (1 toutes les 10 min au plus). Sur le téléphone, avec son mode : actif ou en veille.
 - **📱 « Le téléphone prend le relais : … »** et **😴 « Téléphone en veille : … »** — à chaque changement, sauf au démarrage où l'alerte 🟢 suffit (1 toutes les 5 min au plus).
-- **📊 « Bilan (en ligne depuis …) : N code(s) détecté(s), N gagné(s), N échec(s). »** — chaque jour à minuit. C'est aussi un **signe de vie** : pas de bilan, c'est qu'il y a un problème.
+- **📊 « Bilan (en ligne depuis …) : N code(s) détecté(s), N gagné(s), N échec(s). 🛡️ N code(s) faux d'affilée. »** — chaque jour à minuit. C'est aussi un **signe de vie** : pas de bilan, c'est qu'il y a un problème.
+- **🔄 « Compteur Binance revenu à zéro tout seul entre HH:MM et HH:MM… »** — 1 toutes les 6 h au plus. Le bot a vu le nombre d'essais restants remonter sans code gagné : c'est ainsi qu'on découvre la vraie règle de Binance, utile pour régler `ANTIBAN_STOP_RESUME_H`.
 
 **Test** : **🔔 « Test : si tu lis ce message, les alertes du bot fonctionnent. »** — bouton **Alerte de test** de l'app (ou à la fin de `node index.js --setup`).
 
@@ -328,6 +335,17 @@ S'il en manque une, le bot s'arrête tout de suite avec `🔑 Variables manquant
 - **`ALERT_CHAT_ID`** — vide par défaut : les alertes vont à ton propre compte. À remplir seulement pour un autre destinataire.
 - **`BOT_NAME`** — défaut `💻 PC`, ou `📱 Téléphone` en `backup`. Préfixe des alertes et nom affiché dans le message de relais. Sur le téléphone, l'app met `📱 Téléphone` par défaut (option avancée dans ses Réglages).
 - **`HEALTHCHECK_URL`** — vide par défaut. Adresse appelée au démarrage puis toutes les 5 min (par exemple un check healthchecks.io). Sur le téléphone, mets-la dans les options avancées des Réglages de l'app.
+
+### Anti-blocage (réglages)
+
+Binance verrouille les Red Packets **5 h après 10 codes faux d'affilée** (FAQ officielle). Le bot compte ces codes et agit avant ([fonctionnement](#anti-blocage-binance)). Sur le téléphone, ces réglages sont dans **Réglages → 🛡️ Anti-blocage Binance**.
+
+- **`ANTIBAN_MODE`** — défaut `stop`.
+  - `stop` : garde-fou + arrêt ⛔. Codes clairs seulement à partir de `ANTIBAN_SELECTIVE_AT`, puis plus aucun code à partir de `ANTIBAN_STOP_AT` : le bot ne tape jamais le 10e code faux.
+  - `light` : garde-fou léger seul. Codes clairs seulement à partir de `ANTIBAN_SELECTIVE_AT`, sans arrêt : le blocage de 5 h reste possible.
+- **`ANTIBAN_SELECTIVE_AT`** — défaut `8` (de `0` à `9`). À partir de ce nombre de codes faux d'affilée, seuls les codes **clairs** sont tapés : publiés en monospace, dans un lien Cryptobox ou après « Code : ». Un code qui marche remet le compteur à zéro. `0` = jamais.
+- **`ANTIBAN_STOP_AT`** — défaut `9` (mode `stop`, entre `ANTIBAN_SELECTIVE_AT` et `9`). À partir de ce nombre, plus aucun code n'est tapé, sur le PC comme sur le téléphone. Pour reprendre : réclame toi-même un code qui marche dans l'app Binance, puis envoie `#reprendre` dans tes « Messages enregistrés ».
+- **`ANTIBAN_STOP_RESUME_H`** — défaut `0` (manuelle). Reprise automatique après l'arrêt ⛔, en heures (jusqu'à 168). ⚠️ Elle suppose que le compteur de Binance est revenu à zéro tout seul : règle-la seulement après avoir vu l'alerte 🔄 dans tes logs.
 
 ### Navigateur et Binance
 
@@ -512,29 +530,51 @@ Un code en cours de traitement, ou déjà mémorisé dans `history.json` (gagné
 - **⛔ Une seule soumission par code** — aucun code n'est jamais rejoué, quel que soit le résultat. C'est la protection la plus importante du compteur anti-fraude.
 - **Traitement séquentiel** — un code à la fois, jamais de réclamations en parallèle.
 - **Anti-doublons 48 h** — `history.json` empêche de resoumettre un code déjà gagné ou refusé par Binance, même après un redémarrage (détail dans [Comment les codes sont détectés](#-comment-les-codes-sont-détectés)). Les codes de plus de 48 h sont purgés chaque nuit à minuit.
-- **Pause automatique de 5 h** — si Binance répond « limite / limit / dépassé ».
-- **Pause automatique de 2 h** — si Binance parle de « tentative / attempt » (le compteur se remplit).
+- **Anti-blocage** — voir la section suivante.
 - **Pauses partagées** — avec le relais, l'autre appareil respecte la même pause : c'est le même compte.
 - **Navigateur furtif** — Chromium persistant + `puppeteer-extra-plugin-stealth`, fenêtre visible (`headless: false`), user-agent et langue réalistes.
 - **Session expirée détectée** — si Binance renvoie vers sa page de connexion, les codes sont refusés tout de suite, sans toucher à la page ni la recharger : aucune tentative brûlée, et ta reconnexion n'est pas dérangée. L'adresse (hôte et chemin) est revérifiée juste avant la saisie et après la soumission : **un code n'est jamais tapé dans le formulaire de connexion**. Le retour de la session est détecté tout seul (vérification passive toutes les 20 s), avec les alertes 🔑 puis ✅.
 - **Chromium surveillé** — fenêtre fermée ou onglet planté : relance automatique (3 fois au maximum en 10 min).
 
+### Anti-blocage Binance
+
+**La règle de Binance** (FAQ officielle, mise à jour le 04/06/2026) : « votre compte sera verrouillé pendant 5 heures après 10 tentatives de saisie de code de Red Packet erronées consécutives ». Il n'y a pas de limite de réclamations par jour. Un code qui marche casse la série. Aucune vérification d'un code n'est possible sans le soumettre : le clic « Réclamer » est la vérification.
+
+**Ce que fait le bot :**
+
+- **Il lit chaque refus de Binance** : code d'erreur, texte brut et nombre d'essais restants (« il vous reste 7 tentatives »). Chaque refus est loggé tel quel : `📭 Code X — [403803] <texte> · 7 essai(s) restant(s)`.
+- **Il ne se met plus en pause sur un simple avertissement.** Avant, le mot « tentative » déclenchait 2 h de pause, alors que Binance disait justement qu'il restait des essais.
+- **Il compte les codes faux d'affilée**, en se recalant sur le chiffre de Binance quand il est donné. Compte prudent : un résultat inconnu ou un refus inclassable compte comme un code faux. Un code gagné remet à zéro ; un Red Packet épuisé ou déjà pris ne change rien.
+- **Il agit selon `ANTIBAN_MODE`** :
+
+  | Codes faux d'affilée | Mode `stop` (défaut) | Mode `light` |
+  |---|---|---|
+  | 0 à 7 | tous les codes | tous les codes |
+  | 8 (`ANTIBAN_SELECTIVE_AT`) | codes clairs seulement | codes clairs seulement |
+  | 9 (`ANTIBAN_STOP_AT`) | ⛔ plus aucun code, alerte | codes clairs seulement |
+  | 10 | jamais atteint par le bot | blocage Binance de 5 h |
+
+- **Code clair** : publié en monospace, dans un lien Cryptobox, ou après « Code : ». Les codes trouvés en texte libre sont les plus souvent faux.
+- **Pause seulement sur un vrai blocage** (`403067`, « réessayez dans… », « limite atteinte »), pour la durée annoncée par Binance (5 h par défaut), ou 1 h pour un captcha.
+- **Partagé et gardé** : le compteur, l'arrêt ⛔ et un blocage en cours sont dans `.run/antiban.json` (ils survivent aux redémarrages) et dans le message `#botrelay` (même compte Binance, donc même compteur sur le PC et le téléphone).
+- **`#reprendre`** : envoie ce message dans tes « Messages enregistrés » Telegram pour sortir de l'arrêt ⛔, après avoir réclamé toi-même un code qui marche dans l'app Binance. Les deux appareils le lisent.
+- **Il mesure la vraie règle** : si Binance annonce plus d'essais restants que prévu sans code gagné entre-temps, le compteur est revenu à zéro tout seul. Le bot le signale (🔄), avec l'heure.
+- **Codes `BP…` ignorés** : seuls les codes de 8 caractères sont réclamés.
+
+Les codes d'erreur (`PAY4001COM000`, `403803`, `403804` invalides, `403802` épuisé, `403067` blocage, `100002001` session) viennent de bots open source, pas de Binance : le texte sert de secours, et `PAY4001COM000`, peut-être générique, n'est jamais pris pour un simple code faux quand son texte parle de blocage.
+
 ### Signaux d'alarme dans les logs
 
 ```
-[07/10 14:02:41] ❌ ERROR — 🚨 ALERTE ANTI-BAN : La limite de Binance a été atteinte.
-[07/10 14:02:41] ⚠️  WARN — 🛑 Le bot se met en pause automatique pour 5 heures.
-```
-
-Et pour la pause de 2 h :
-
-```
-[07/10 14:02:41] ❌ ERROR — 🚨 AVERTISSEMENT ANTI-BAN : Binance signale des tentatives restantes.
-[07/10 14:02:41] ⚠️  WARN — 🛑 Pause de sécurité de 2 heures déclenchée pour réinitialiser le compteur.
+[09/10 14:02:41] ⚠️  WARN — 📭 Code AB12CD34 — [PAY4001COM000] Code incorrect. Il vous reste 2 tentatives. · 2 essai(s) restant(s)
+[09/10 14:02:41] ⚠️  WARN — 🟠 Anti-blocage : 8 code(s) faux d'affilée — seuls les codes clairs (monospace, lien
+                                Cryptobox, « Code : ») sont tapés jusqu'au prochain code qui marche
+[09/10 14:05:12] ⚠️  WARN — 🛡️ Code XY98ZW76 sauté — 8 codes faux d'affilée — codes clairs seulement (celui-ci est en texte libre)
+[09/10 14:09:30] ❌ ERROR — ⛔ ARRÊT ANTI-BLOCAGE : 9 code(s) faux d'affilée — plus que 1 essai(s) avant le blocage
 ```
 
 > [!WARNING]
-> Si ces messages reviennent **plusieurs fois par jour**, réduis le nombre de canaux dans `TARGET_CHANNELS` : tu soumets trop de codes morts. Regarde aussi le taux de réussite (`💰 Gains`) dans le bilan : un taux très bas veut dire que tu arrives trop tard.
+> Si 🟠 ou ⛔ reviennent **souvent**, retire de `TARGET_CHANNELS` les canaux qui publient des codes faux : ils te coûtent des essais. Regarde aussi le taux de réussite (`💰 Gains`) dans le bilan : un taux très bas veut dire que tu arrives trop tard.
 
 ---
 
@@ -551,7 +591,9 @@ Ils couvrent : la détection de session (`loggedInIndicators` / `loggedOutIndica
 
 Le bot lit les **réponses** de ces deux requêtes : le montant gagné (par exemple « 0.0009 SPELL ») ou le motif du refus. Sans réponse de Binance, le résultat est « inconnu » : jamais un faux « GAGNÉ ».
 
-**Après toute modification de `src/binance.js`**, lance `npm run test:claim`. Le test fait passer la réclamation par 12 scénarios (succès, refus, session expirée, limite anti-ban, fenêtre lente ou absente, réponse d'un ancien code…), avec le vrai Chromium du bot, face à une page Cryptobox simulée : aucune requête ne part vers Binance.
+**Après toute modification de `src/binance.js`**, lance `npm test`.
+- `npm run test:guard` vérifie l'anti-blocage sans navigateur : lecture des refus, compteur, modes `stop` et `light`, `#reprendre`, relais, sources des codes.
+- `npm run test:claim` fait passer la réclamation par 17 scénarios (succès, refus, session expirée, avertissement « il vous reste N tentatives » sans pause, captcha, blocage, fenêtre lente ou absente, réponse d'un ancien code…), avec le vrai Chromium du bot, face à une page Cryptobox simulée : aucune requête ne part vers Binance.
 
 **Pour mettre à jour un sélecteur :**
 
@@ -721,7 +763,9 @@ sudo journalctl -u cryptobox-bot -f
 | `⏰ 25 messages d'affilée…`, ou `⏮️ Avant démarrage` qui grimpe | Horloge en avance : `w32tm /resync` (Windows), `sudo timedatectl set-ntp true` (Linux), date et heure automatiques dans les Paramètres (téléphone). |
 | `🕰️ Beaucoup de messages jugés périmés` | Vérifie l'horloge, ou augmente `MAX_MESSAGE_AGE_S`. |
 | `🐢 Limite Telegram atteinte` | Le bot gère seul. Fréquent au démarrage ? Réduis le nombre de canaux. |
-| `🚨 ALERTE ANTI-BAN` ou `🚨 AVERTISSEMENT ANTI-BAN` | Pause automatique (5 h ou 2 h). Trop de codes morts : retire les canaux les moins rentables. |
+| `🚨 BLOCAGE BINANCE` | Vrai blocage (10 codes faux d'affilée, limite ou captcha) : pause automatique de la durée annoncée. Passe en `ANTIBAN_MODE=stop` pour ne plus l'atteindre. |
+| `⛔ ARRÊT ANTI-BLOCAGE` | Réclame toi-même un code qui marche dans l'app Binance, puis envoie `#reprendre` dans tes Messages enregistrés. Retire les canaux qui publient des codes faux. |
+| `🛡️ Code … sauté` | Normal en mode codes clairs (🟠) ou à l'arrêt (⛔) : le code n'est pas mémorisé, il sera réexaminé s'il est republié. |
 | `⏭️ Code … abandonné — champ de saisie introuvable` | Page lente ou session expirée : regarde la fenêtre Binance (PC), ou ouvre **Connexion Binance** dans l'app (téléphone). |
 | `🔑 Session Binance expirée — code … non soumis` | Reconnecte-toi : fenêtre Chromium (PC), ou notification 🔑 / **Connexion Binance** dans l'app (téléphone). |
 | `⏰ Timeout — connexion Binance non détectée` | Connecte-toi plus vite, ou augmente `BINANCE_LOGIN_TIMEOUT` (`0` = sans limite). |

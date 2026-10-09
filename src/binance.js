@@ -766,10 +766,15 @@ async function passiveLoginCheck() {
 
 // ─── Pause anti-ban ─────────────────────────────────────────────────────────
 
-/** Déclenche une pause anti-ban locale et prévient l'orchestrateur. */
-function startPause(durationMs) {
-  pauseUntil = Date.now() + durationMs;
-  hooks.onPause?.(pauseUntil);
+/**
+ * Déclenche une pause locale (blocage Binance ou captcha) et prévient
+ * l'orchestrateur.
+ * @param {number} durationMs
+ * @param {'locked'|'captcha'} reason
+ */
+function startPause(durationMs, reason) {
+  pauseUntil = Math.max(pauseUntil, Date.now() + durationMs);
+  hooks.onPause?.(pauseUntil, reason);
 }
 
 /**
@@ -844,11 +849,120 @@ function waitGiftResponse(page, pathPart, code, timeout) {
     .catch(() => null);
 }
 
-/** Message d'erreur d'une réponse de l'API (code ≠ 000000), ou '' si elle est bonne. */
-function giftError(body) {
-  if (!body || typeof body !== 'object') return '';
-  if (body.code === '000000' && body.success !== false && body.data?.success !== false) return '';
-  return String(body.messageDetail || body.message || `erreur Binance ${body.code ?? 'inconnue'}`);
+/**
+ * Refus contenu dans une réponse de l'API (code ≠ 000000), ou null si elle
+ * est bonne. Le code d'erreur de Binance est gardé : il classe le refus mieux
+ * que le texte, qui dépend de la langue de la page.
+ * @returns {{ text: string, apiCode: string, captcha: boolean } | null}
+ */
+function giftRefusal(body) {
+  if (!body || typeof body !== 'object') return null;
+  if (body.code === '000000' && body.success !== false && body.data?.success !== false) return null;
+  return {
+    text: String(body.messageDetail || body.message || `erreur Binance ${body.code ?? 'inconnue'}`),
+    apiCode: body.code !== undefined && body.code !== null ? String(body.code) : '',
+    captcha: Boolean(body.data && typeof body.data === 'object' && 'validateId' in body.data),
+  };
+}
+
+// ─── Lecture des refus de Binance ───────────────────────────────────────────
+//
+// FAQ Binance : 10 codes faux CONSÉCUTIFS → Red Packets verrouillés 5 h.
+// Un avertissement « il vous reste N tentatives » n'est PAS un blocage : le
+// bot continue (src/antiban.js décide de la suite). Seul un vrai blocage met
+// le bot en pause, pour la durée annoncée par Binance.
+
+// Nombre de codes faux d'affilée avant le blocage Binance
+const MAX_ATTEMPTS = 10;
+// Durée du blocage selon la FAQ, si le message ne la donne pas
+const DEFAULT_LOCK_MS = 5 * 60 * 60 * 1000;
+const LOCK_MARGIN_MS = 60 * 1000;
+const CAPTCHA_PAUSE_MS = 60 * 60 * 1000;
+
+// Codes d'erreur de code/query et grabV2, relevés dans plusieurs bots open
+// source (non documentés par Binance) : le texte sert de secours.
+const REFUSAL_CODES = {
+  PAY4001COM000: 'invalid',
+  403803: 'invalid',
+  403804: 'invalid',
+  403802: 'exhausted',
+  403067: 'locked',
+  100002001: 'session',
+};
+// Code peut-être générique (« COM000 ») : son texte est lu d'abord, pour ne
+// jamais prendre un blocage pour un simple code faux
+const GENERIC_CODES = new Set(['PAY4001COM000']);
+
+// Dans cet ordre : un message de blocage peut aussi parler de « code » ou de
+// « tentatives ».
+const REFUSAL_TEXTS = [
+  ['exhausted', /entièrement|épuis|expir|fully|\bempty\b|\bvide\b|\bended\b|terminé|plus disponible|no longer available|all (?:the )?(?:rewards|gifts)/i],
+  ['grabbed', /déjà (?:été )?(?:réclamé|reçu|ouvert|récupéré)|already (?:claimed|received|grabbed|opened)|claimed it already|cannot claim twice/i],
+  ['locked', /verrouill|bloqu|r[ée]essay\w*\s+(?:dans|après|plus tard)|try again (?:in|after|later)|too many|trop de (?:tentatives|essais|demandes)|maximum (?:de |d')?(?:tentatives|essais)|maximum (?:number of )?attempts|exceeded|dépass|limite (?:atteinte|quotidienne|journalière)|limit (?:reached|exceeded)|temporarily restricted|frequen/i],
+  ['invalid', /invalide?|n'existe pas|does ?n[o']t exist|incorrect|erron|introuvable|not found|wrong code/i],
+];
+
+/**
+ * Nombre d'essais restants annoncé par Binance, ou null. Seules les tournures
+ * explicites comptent (« il vous reste 7 tentatives », « 7 attempts left ») :
+ * la règle « après 10 tentatives… 5 heures » ne doit jamais être lue comme un
+ * nombre d'essais restants.
+ * @param {string} text
+ * @returns {number|null}
+ */
+function parseRemaining(text) {
+  const t = String(text ?? '').toLowerCase();
+  const patterns = [
+    /(?:il (?:vous |te )?reste|reste encore|remaining|left)\s*:?\s*(\d{1,2})\b/g,
+    /(?:restante?s?|remaining)\s+(?:tentatives?|essais?|attempts?|tries)\s*:?\s*(\d{1,2})\b/g,
+    /(?:tentatives?|essais?|attempts?|tries)\s+(?:restante?s?|remaining)\s*:?\s*(\d{1,2})\b/g,
+    /\b(\d{1,2})\s*(?:more )?(?:tentatives?|essais?|attempts?|tries|chances?)\s*(?:restante?s?|remaining|left)/g,
+  ];
+  const found = new Set();
+  for (const re of patterns) {
+    for (const m of t.matchAll(re)) found.add(parseInt(m[1], 10));
+  }
+  if (found.size !== 1) return null; // aucun nombre, ou ambigu
+  const value = [...found][0];
+  return value >= 0 && value <= MAX_ATTEMPTS ? value : null;
+}
+
+/**
+ * Durée du blocage annoncée par Binance (« réessayez dans 4 h 59 min »),
+ * plus une marge ; 5 h (FAQ) si le message n'en donne pas.
+ * @param {string} text
+ * @returns {number} millisecondes
+ */
+function parseLockMs(text) {
+  const t = String(text ?? '').toLowerCase();
+  const hours = /(\d{1,2})\s*(?:h\b|heures?\b|hours?\b|hrs?\b)/.exec(t);
+  const minutes = /(\d{1,3})\s*(?:min\w*|mn\b)/.exec(t);
+  if (!hours && !minutes) return DEFAULT_LOCK_MS + LOCK_MARGIN_MS;
+  const ms = (hours ? parseInt(hours[1], 10) * 3600_000 : 0) + (minutes ? parseInt(minutes[1], 10) * 60_000 : 0);
+  // Garde-fous : jamais moins d'une minute ni plus de 24 h
+  return Math.min(24 * 3600_000, Math.max(60_000, ms)) + LOCK_MARGIN_MS;
+}
+
+/**
+ * Nature d'un refus de Binance.
+ * @param {{ text?: string, apiCode?: string, captcha?: boolean, reason?: string }} refusal
+ *   reason : nature déjà connue (Red Packet épuisé ou déjà pris, lus dans la réponse).
+ * @param {number|null} [remaining] essais restants (parseRemaining)
+ * @returns {'invalid'|'exhausted'|'grabbed'|'locked'|'session'|'captcha'|'other'}
+ */
+function classifyRefusal(refusal = {}, remaining = parseRemaining(refusal.text)) {
+  if (refusal.reason) return refusal.reason;
+  if (refusal.captcha) return 'captcha';
+  const apiCode = String(refusal.apiCode ?? '');
+  const byCode = REFUSAL_CODES[apiCode];
+  if (byCode && !GENERIC_CODES.has(apiCode)) return byCode;
+  if (remaining === 0) return 'locked';
+  if (remaining !== null) return 'invalid'; // il reste des essais : pas un blocage
+  const text = String(refusal.text ?? '');
+  for (const [kind, re] of REFUSAL_TEXTS) {
+    if (re.test(text)) return kind;
+  }
+  return byCode || 'other';
 }
 
 // Session expirée : l'API répond « connecte-toi » (HTTP 401/403, ou message)
@@ -857,7 +971,8 @@ const LOGIN_ERROR = /\blog ?in\b|login|connecte|session|authent|unauthori[sz]ed|
 function isLoginError(reply) {
   if (!reply) return false;
   if (reply.status === 401 || reply.status === 403) return true;
-  return LOGIN_ERROR.test(giftError(reply.body));
+  const refusal = giftRefusal(reply.body);
+  return Boolean(refusal) && (refusal.apiCode === '100002001' || LOGIN_ERROR.test(refusal.text));
 }
 
 /** Preuve positive de l'encaissement dans la réponse d'ouverture. */
@@ -943,26 +1058,41 @@ function waitForLoginRedirect() {
     .catch(() => { });
 }
 
-/** Code refusé par Binance : message, et pause anti-ban si la limite est atteinte. */
-function claimFailure(code, errorText) {
-  logger.warn(`📭 Code ${code} — ${String(errorText).substring(0, 160)}`);
+/**
+ * Code refusé par Binance : le refus est classé et journalisé avec le code
+ * d'erreur et le texte brut de Binance. Pause SEULEMENT si Binance bloque
+ * vraiment (ou demande un captcha) : un avertissement « il vous reste N
+ * tentatives » ne l'est pas.
+ * @param {string} code
+ * @param {{ text: string, apiCode?: string, captcha?: boolean, reason?: string }} refusal
+ */
+function claimFailure(code, refusal) {
+  const text = String(refusal.text ?? '');
+  const apiCode = refusal.apiCode || '';
+  const remaining = parseRemaining(text);
+  const reason = classifyRefusal(refusal, remaining);
+  const left = remaining !== null ? ` · ${remaining} essai(s) restant(s)` : '';
+  logger.warn(`📭 Code ${code} — ${apiCode ? `[${apiCode}] ` : ''}${text.substring(0, 160)}${left}`);
 
-  // ─── Protection Anti-Ban Binance ─────────────────────────────────────────
-  const lowerError = String(errorText).toLowerCase();
-  if (lowerError.includes('limite') || lowerError.includes('limit') || lowerError.includes('dépassé')) {
-    logger.error(`🚨 ALERTE ANTI-BAN : La limite de Binance a été atteinte.`);
-    logger.warn(`🛑 Le bot se met en pause automatique pour 5 heures.`);
-    startPause(5 * 60 * 60 * 1000);
-    return { remember: false, status: 'rate_limited' };
-  }
-  if (lowerError.includes('tentative') || lowerError.includes('attempt')) {
-    logger.error(`🚨 AVERTISSEMENT ANTI-BAN : Binance signale des tentatives restantes.`);
-    logger.warn(`🛑 Pause de sécurité de 2 heures déclenchée pour réinitialiser le compteur.`);
-    startPause(2 * 60 * 60 * 1000);
-    return { remember: false, status: 'rate_limited' };
-  }
+  const details = { reason, apiCode, remaining, submitted: true };
 
-  return { remember: true, status: 'permanent_failure' };
+  if (reason === 'session') {
+    // Session expirée : Binance n'a pas traité le code
+    return { ...loginRequired(code), ...details };
+  }
+  if (reason === 'locked') {
+    const ms = parseLockMs(text);
+    logger.error(`🚨 BLOCAGE BINANCE : Red Packets verrouillés (${MAX_ATTEMPTS} codes faux d'affilée ou limite atteinte).`);
+    logger.warn(`🛑 Aucun code ne sera tenté pendant ${Math.round(ms / 60_000)} min (durée annoncée par Binance, ou 5 h).`);
+    startPause(ms, 'locked');
+    return { remember: false, status: 'rate_limited', ...details, remaining: 0 };
+  }
+  if (reason === 'captcha') {
+    logger.error('🧩 Binance demande un captcha — pause d\'1 h (résous-le dans la fenêtre Binance du PC si tu peux)');
+    startPause(CAPTCHA_PAUSE_MS, 'captcha');
+    return { remember: false, status: 'rate_limited', ...details };
+  }
+  return { remember: true, status: 'permanent_failure', ...details };
 }
 
 /**
@@ -995,6 +1125,10 @@ async function claimCode(code, opts = {}) {
   // Téléphone : images à cadence normale pendant la réclamation (clics et
   // fenêtres de Binance réactifs, même écran éteint)
   webview?.boost(60000);
+
+  // Le code a-t-il été soumis (clic « Réclamer ») ? Un échec technique après
+  // la soumission compte peut-être comme un essai chez Binance.
+  let submitted = false;
 
   {
     try {
@@ -1091,6 +1225,7 @@ async function claimCode(code, opts = {}) {
       } else {
         await cryptoboxPage.keyboard.press('Enter');
       }
+      submitted = true;
 
       const query = await queryResponse;
       // Session expirée juste avant la soumission : réponse « connecte-toi »
@@ -1098,15 +1233,19 @@ async function claimCode(code, opts = {}) {
       if (isLoginPage(cryptoboxPage.url()) || isLoginError(query)) return loginRequired(code);
       const queryData = query?.body?.data;
       if (query?.body) {
-        const queryError = giftError(query.body);
-        if (queryError) {
+        const queryRefusal = giftRefusal(query.body);
+        if (queryRefusal) {
           // Une session expirée peut répondre une erreur, puis renvoyer vers la connexion
           await waitForLoginRedirect();
           if (isLoginPage(cryptoboxPage.url())) return loginRequired(code);
-          return claimFailure(code, queryError);
+          return claimFailure(code, queryRefusal);
         }
-        if (queryData?.grabbed) return claimFailure(code, 'déjà réclamé avec ce compte');
-        if (queryData?.fullyClaimed) return claimFailure(code, 'Red Packet entièrement réclamé');
+        if (queryData?.grabbed) {
+          return claimFailure(code, { text: 'déjà réclamé avec ce compte', reason: 'grabbed' });
+        }
+        if (queryData?.fullyClaimed) {
+          return claimFailure(code, { text: 'Red Packet entièrement réclamé', reason: 'exhausted' });
+        }
       }
 
       // 6. « Ouvrir » (un seul clic) dans la fenêtre du Red Packet. Elle peut
@@ -1126,11 +1265,11 @@ async function claimCode(code, opts = {}) {
       if (isLoginPage(cryptoboxPage.url()) || isLoginError(grab)) return loginRequired(code);
 
       if (grab?.body) {
-        const grabError = giftError(grab.body);
-        if (grabError) {
+        const grabRefusal = giftRefusal(grab.body);
+        if (grabRefusal) {
           await waitForLoginRedirect();
           if (isLoginPage(cryptoboxPage.url())) return loginRequired(code);
-          return claimFailure(code, grabError);
+          return claimFailure(code, grabRefusal);
         }
         if (isGrabSuccess(grab.body)) {
           const gain = giftAmount(grab.body.data) || await readGainFromPage();
@@ -1151,14 +1290,14 @@ async function claimCode(code, opts = {}) {
         return { remember: true, status: 'success', gain: pageGain };
       }
       const errorText = await readErrorFromPage();
-      if (errorText) return claimFailure(code, errorText);
+      if (errorText) return claimFailure(code, { text: errorText });
 
       logger.warn(
         `❔ Code ${code} — ${opened ? 'Binance n\'a pas confirmé l\'encaissement après « Ouvrir »' : 'fenêtre « Ouvrir » jamais affichée'} : ` +
           'résultat inconnu, vérifie l\'historique Cryptobox (aucun retry)',
       );
       await closeRedPacketWindow();
-      return { remember: true, status: 'unknown' };
+      return { remember: true, status: 'unknown', submitted: true };
 
     } catch (err) {
       // ⛔ Pas de seconde tentative : on remet la page à zéro et on passe au
@@ -1169,7 +1308,7 @@ async function claimCode(code, opts = {}) {
       if (!awaitingLogin && cryptoboxPage && !cryptoboxPage.isClosed()) {
         try { await cryptoboxPage.reload(); } catch (_) { }
       }
-      return { remember: false, status: 'temporary_failure' };
+      return { remember: false, status: 'temporary_failure', submitted };
     }
   }
 }
@@ -1198,4 +1337,8 @@ module.exports = {
   // Exposés pour les tests
   isLoginPage,
   isOnCryptobox,
+  classifyRefusal,
+  parseRemaining,
+  parseLockMs,
+  _resetPauseForTests: () => { pauseUntil = 0; },
 };

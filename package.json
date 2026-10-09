@@ -8,6 +8,8 @@
     "dev": "node --watch index.js",
     "apk": "node android/scripts/build-apk.mjs",
     "apk:install": "node android/scripts/build-apk.mjs --install",
+    "test": "node test/guard.js && node test/claim-flow.js",
+    "test:guard": "node test/guard.js",
     "test:claim": "node test/claim-flow.js"
   },
   "engines": {

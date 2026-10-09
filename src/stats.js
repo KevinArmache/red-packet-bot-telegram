@@ -30,6 +30,7 @@ const state = {
   codesFailed: 0, // Code invalide / expiré / déjà pris
   codesSkipped: 0, // Non tentés (pause anti-ban, navigateur indisponible, session Binance)
   codesDeferred: 0, // Laissés à l'autre appareil (relais PC ⇄ téléphone)
+  codesGuarded: 0, // Sautés par l'anti-blocage (codes en texte libre, arrêt ⛔)
 
   // Latences (ms)
   totalDetectToClaimMs: 0,
@@ -115,6 +116,7 @@ function snapshot(extraRows = []) {
       ["📭 Échecs", state.codesFailed],
       ["⏭️ Ignorés", `${state.codesSkipped} (pause/navigateur/session)`],
       ...(state.codesDeferred ? [["🤝 Laissés à l'autre appareil", state.codesDeferred]] : []),
+      ...(state.codesGuarded ? [["🛡️ Sautés (anti-blocage)", state.codesGuarded]] : []),
       ["🔁 Doublons filtrés", state.codesDuplicate],
       ["⏮️ Avant démarrage", `${state.messagesBacklog} (jamais traités)`],
       ["🕰️ Messages périmés", state.messagesStale],

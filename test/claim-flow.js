@@ -95,7 +95,8 @@ const OK_GRAB = {
   code: "000000", message: null, messageDetail: null, success: true,
   data: { success: true, currency: "SPELL", grabAmount: 0.0009, grabAmountStr: "0.0009" },
 };
-const apiError = (messageDetail) => ({ code: "PAY4001COM000", message: messageDetail, messageDetail, success: false, data: null });
+const apiError = (messageDetail, code = "PAY4001COM000", data = null) => ({ code, message: messageDetail, messageDetail, success: false, data });
+const HOUR = 3600_000;
 const STALE_GRAB = { ...OK_GRAB, data: { success: true, currency: "FAKE", grabAmount: 9.99, grabAmountStr: "9.99" } };
 const NO_PROOF_GRAB = { code: "000000", message: null, messageDetail: null, success: true, data: null };
 const LURE_NOTE = "Binance sent you 100 USDT ≈ $100";
@@ -143,7 +144,8 @@ chromium.launchPersistentContext = async (dir, options) => {
 
 const binance = require("../src/binance");
 
-// Le scénario de limite Binance met le bot en pause : il passe en dernier
+// Les scénarios de pause (captcha, blocage) passent en dernier ; la pause est
+// effacée après chacun (resetPause) pour que le suivant puisse réclamer
 const SCENARIOS = [
   { name: "succès rapide", query: OK_QUERY, grab: OK_GRAB, expect: { status: "success", gain: "0.0009 SPELL", grab: 1 } },
   { name: "fenêtre « Ouvrir » lente (comme sur le téléphone)", ui: { envelopeDelay: 4500, buttonDelay: 1500 }, query: OK_QUERY, grab: OK_GRAB, expect: { status: "success", gain: "0.0009 SPELL", grab: 1 } },
@@ -156,7 +158,13 @@ const SCENARIOS = [
   { name: "réponse tardive d'un ancien code ignorée", ui: { staleGrab: true, envelopeDelay: 600 }, query: OK_QUERY, grab: OK_GRAB, expect: { status: "success", gain: "0.0009 SPELL", grab: 1, staleGrab: 1 } },
   { name: "note trompeuse + ouverture sans preuve → inconnu", ui: { keepEnvelope: true }, query: { ...OK_QUERY, data: { ...OK_QUERY.data, note: LURE_NOTE } }, grab: NO_PROOF_GRAB, expect: { status: "unknown", grab: 1 } },
   { name: "session Binance expirée (HTTP 401)", queryStatus: 401, query: { code: "100002001", message: "Please log in first", messageDetail: null, success: false, data: null }, expect: { status: "logged_out", grab: 0 }, waitLogin: true },
-  { name: "limite Binance atteinte (pause anti-ban)", query: apiError("Vous avez atteint la limite quotidienne de réclamations"), expect: { status: "rate_limited", grab: 0 } },
+  // Anti-blocage : un avertissement « il vous reste N tentatives » n'est pas un blocage
+  { name: "code faux, « il vous reste 7 tentatives » → pas de pause", query: apiError("Code incorrect. Il vous reste 7 tentatives."), expect: { status: "permanent_failure", reason: "invalid", remaining: 7, grab: 0, noPause: true } },
+  { name: "code faux (403803) → pas de pause", query: apiError("Invalid code", "403803"), expect: { status: "permanent_failure", reason: "invalid", grab: 0, noPause: true } },
+  { name: "Red Packet épuisé (403802)", query: apiError("Ce Red Packet a été entièrement réclamé", "403802"), expect: { status: "permanent_failure", reason: "exhausted", grab: 0, noPause: true } },
+  { name: "captcha demandé → pause d'1 h", query: apiError("Veuillez compléter la vérification de sécurité", "400100", { validateId: "abc123" }), expect: { status: "rate_limited", reason: "captcha", grab: 0, pauseMs: [0.95 * HOUR, 1.05 * HOUR] }, resetPause: true },
+  { name: "blocage Binance (403067) → pause lue dans le message", query: apiError("Trop de tentatives. Réessayez dans 4 h 59 min.", "403067"), expect: { status: "rate_limited", reason: "locked", grab: 0, pauseMs: [4.9 * HOUR, 5.1 * HOUR] }, resetPause: true },
+  { name: "limite Binance atteinte (pause anti-ban, 5 h par défaut)", query: apiError("Vous avez atteint la limite quotidienne de réclamations"), expect: { status: "rate_limited", reason: "locked", grab: 0, pauseMs: [4.9 * HOUR, 5.1 * HOUR] } },
 ];
 
 async function main() {
@@ -185,6 +193,16 @@ async function main() {
     if (counters.grab !== s.expect.grab) problems.push(`${counters.grab} « Ouvrir » (attendu ${s.expect.grab})`);
     if (counters.cookieConfirm) problems.push("bouton de la fenêtre des cookies cliqué");
     if ((s.expect.staleGrab ?? 0) !== counters.staleGrab) problems.push(`${counters.staleGrab} réponse(s) d'un autre code (attendu ${s.expect.staleGrab ?? 0})`);
+    if (s.expect.reason && result.reason !== s.expect.reason) problems.push(`refus « ${result.reason} » (attendu « ${s.expect.reason} »)`);
+    if (s.expect.remaining !== undefined && result.remaining !== s.expect.remaining) {
+      problems.push(`${result.remaining} essai(s) restant(s) lu(s) (attendu ${s.expect.remaining})`);
+    }
+    const pauseMs = binance.getStatus().pauseUntil - started;
+    if (s.expect.noPause && binance.getStatus().pauseUntil > Date.now()) problems.push("pause déclenchée (aucune attendue)");
+    if (s.expect.pauseMs && (pauseMs < s.expect.pauseMs[0] || pauseMs > s.expect.pauseMs[1])) {
+      problems.push(`pause de ${Math.round(pauseMs / 60_000)} min (attendu ${Math.round(s.expect.pauseMs[0] / 60_000)} à ${Math.round(s.expect.pauseMs[1] / 60_000)})`);
+    }
+    if (s.resetPause) binance._resetPauseForTests();
     const ms = Date.now() - started;
     if (s.waitLogin) {
       // Session « rétablie » toute seule (la page simulée est connectée) avant la suite

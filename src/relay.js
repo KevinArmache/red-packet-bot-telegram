@@ -62,6 +62,9 @@ const RELAY_NOTIFY_COOLDOWN_MS = 5 * 60_000;
 const STATUS_RE =
   /#botrelay\s+role=(primary|backup|solo)\s+state=([a-z]+)\s+pause=(\d+)(?:\s+inst=([0-9a-f]+))?(?:\s+since=(\d+))?/i;
 const CODES_RE = /^codes=([A-Z0-9,]*)\s*$/m;
+// Compteur anti-blocage (src/antiban.js), à la suite de la ligne #botrelay :
+// les versions précédentes ignorent ces jetons
+const ANTIBAN_RE = /#botrelay\b[^\n]*?\sfails=(\d+)\s+failsAt=(\d+)(?:\s+halt=([01]))?/i;
 
 function normalizeRole(raw) {
   const role = String(raw ?? "primary").trim().toLowerCase();
@@ -136,6 +139,7 @@ function parseStatus(text) {
   const m = STATUS_RE.exec(text ?? "");
   if (!m) return null;
   const line = CODES_RE.exec(text ?? "");
+  const guard = ANTIBAN_RE.exec(text ?? "");
   return {
     role: m[1].toLowerCase(),
     state: m[2].toLowerCase(),
@@ -143,6 +147,10 @@ function parseStatus(text) {
     instance: m[4] ? m[4].toLowerCase() : null,
     since: Number(m[5]) || 0,
     codes: line?.[1] ? line[1].split(",").filter((c) => /^[A-Z0-9]{8}$/.test(c)) : [],
+    // failsAt : heure SERVEUR (les horloges des deux appareils peuvent différer)
+    antiban: guard
+      ? { fails: Number(guard[1]) || 0, failsAt: Number(guard[2]) || 0, halted: guard[3] === "1" }
+      : null,
   };
 }
 
@@ -216,6 +224,10 @@ function describeMode() {
  * @param {(until: number, fromRole: string) => void} [cb.onSharedPause]
  * @param {(codes: string[], fromRole: string) => void} [cb.onPeerCodes]
  *   codes tapés par l'autre appareil : à ajouter à l'historique
+ * @param {() => { fails: number, failsAt: number, halted: boolean }} [cb.getAntiban]
+ *   compteur anti-blocage de cet appareil (failsAt en heure locale)
+ * @param {(state: { fails: number, failsAt: number, halted: boolean }, fromRole: string) => void} [cb.onPeerAntiban]
+ *   compteur publié par l'autre appareil (failsAt converti en heure locale)
  */
 async function start(client, cb = {}) {
   if (ROLE === "solo") {
@@ -326,6 +338,7 @@ function handleSelfMessage(msg) {
 
   if (info.pauseUntil > Date.now()) applySharedPause(info.pauseUntil, info.role);
   if (info.codes.length) applyPeerCodes(info.codes, info.role);
+  if (info.antiban && info.role === PEER_ROLE) applyPeerAntiban(info.antiban, info.role);
 
   if (info.role === ROLE) {
     if (info.state !== "stopped") warnDuplicateRole();
@@ -359,6 +372,12 @@ function recordClaim(code) {
 function announcePause(until) {
   if (ROLE === "solo" || !tg) return;
   sharedPauseUntil = Math.max(sharedPauseUntil, until);
+  schedulePublish();
+}
+
+/** Le compteur anti-blocage a changé ICI : publié pour l'autre appareil. */
+function announceAntiban() {
+  if (ROLE === "solo" || !tg) return;
   schedulePublish();
 }
 
@@ -421,6 +440,7 @@ function applyFound(found) {
     }
 
     if (info.codes.length) applyPeerCodes(info.codes, info.role);
+    if (info.antiban && info.role === PEER_ROLE) applyPeerAntiban(info.antiban, info.role);
     if (info.role === PEER_ROLE && (!latestPeer || stamp > latestPeer.stamp)) {
       latestPeer = { stamp, info };
     }
@@ -450,6 +470,12 @@ function applyFound(found) {
 function applyPeerCodes(codes, fromRole) {
   // Avant start(), callbacks est vide : la recherche de démarrage les relira
   callbacks.onPeerCodes?.(codes, fromRole);
+}
+
+/** Compteur anti-blocage de l'autre appareil (même compte Binance). */
+function applyPeerAntiban(state, fromRole) {
+  if (!state.failsAt) return;
+  callbacks.onPeerAntiban?.({ ...state, failsAt: state.failsAt - clockOffset }, fromRole);
 }
 
 // ─── Publication de l'état ──────────────────────────────────────────────────
@@ -507,13 +533,18 @@ function pruneLedger() {
 
 function renderStatus(current) {
   pruneLedger();
+  const guard = callbacks.getAntiban?.();
+  const guardTokens = guard
+    ? ` fails=${guard.fails} failsAt=${guard.failsAt ? Math.round(guard.failsAt + clockOffset) : 0}` +
+      ` halt=${guard.halted ? 1 : 0}`
+    : "";
   const lines = [
     `🤖 Relais Red Packet — ${notifier.LABEL}`,
     `${describeState(current)} · ${consequence(current)}`,
     `Dernier signal : ${fmtClock(Date.now())}`,
     "",
     `${TAG} role=${ROLE} state=${current.state} pause=${current.pauseUntil} ` +
-      `inst=${INSTANCE} since=${owner ? ownerSince : 0}`,
+      `inst=${INSTANCE} since=${owner ? ownerSince : 0}${guardTokens}`,
   ];
   if (myCodes.size > 0) lines.push(`codes=${[...myCodes.keys()].join(",")}`);
   return lines.join("\n");
@@ -807,6 +838,7 @@ module.exports = {
   handleSelfMessage,
   recordClaim,
   announcePause,
+  announceAntiban,
   statsRows,
   // Exposé pour les tests
   parseStatus,
