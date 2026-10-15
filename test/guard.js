@@ -323,6 +323,15 @@ async function main() {
       [{ code: "ZZ11YY22", source: "monospace" }],
     );
     check("code BP de 10 caractères ignoré", extractCodes({ plain: "Red packet BPUB4ALVZP", trusted: ["BPJ09HYNNK"] }), []);
+    // Telegram : liste de codes sans aucun mot autour (@rsbox, 15/10/2026)
+    check("liste nue : le code 100 % lettres est pris", extractCodes({ plain: "L24IZFQZ\nPABVFEBL", trusted: [] }), [
+      { code: "L24IZFQZ", source: "texte" },
+      { code: "PABVFEBL", source: "texte" },
+    ]);
+    check("message réduit à un code 100 % lettres", extractCodes({ plain: "🎁 PABVFEBL 🎁", trusted: [] }), [
+      { code: "PABVFEBL", source: "texte" },
+    ]);
+    check("mot courant seul en message : ignoré", extractCodes({ plain: "TELEGRAM", trusted: [] }), []);
     check("« BP » de 8 caractères ignoré", extractCodes({ plain: "Code : BPVV80RZ", trusted: ["BPVV80RZ"] }), []);
   }
 
@@ -357,6 +366,39 @@ async function main() {
       [{ code: "LM34NP56", source: "lien" }],
     );
     check("autre exchange ignoré", codes({ text: "Bybit gift code: QW12ER34" }), []);
+    // Post réel (Sloomo, 15/10/2026) : 3 codes, chacun seul sur sa ligne
+    check(
+      "liste de codes : le code 100 % lettres seul sur sa ligne est pris",
+      codes({
+        title: "Sloomo",
+        text:
+          "Binance Red Packet Codes 🎁 \n\nOWUVALT5\n4RGO2XUM\nLJSSNXTT\n\n" +
+          "Join our Telegram for more codes 👇\nt.me/sloomobot/app pic.",
+      }),
+      [
+        { code: "OWUVALT5", source: "texte" },
+        { code: "4RGO2XUM", source: "texte" },
+        { code: "LJSSNXTT", source: "texte" },
+      ],
+    );
+    check("liste numérotée « 1. LJSSNXTT »", codes({ text: "Red packet codes\n1. LJSSNXTT\n2) QWRTPLKM" }), [
+      { code: "LJSSNXTT", source: "texte" },
+      { code: "QWRTPLKM", source: "texte" },
+    ]);
+    check("code 100 % lettres seul, sans annonce de codes : ignoré", codes({ text: "Bonjour\nLJSSNXTT\nà demain" }), []);
+    check("en minuscules sur sa ligne : ignoré", codes({ text: "Red packet\nljssnxtt" }), []);
+    check("dans une phrase : ignoré", codes({ text: "Red packet LJSSNXTT pour vous" }), []);
+    check("mot courant seul sur sa ligne : ignoré", codes({ text: "Red packet 🧧\nGOODLUCK\nTELEGRAM\nGIVEAWAY" }), []);
+    check("titre d'actualité en majuscules : ignoré", codes({ text: "BREAKING\nBitcoin dépasse les 100k" }), []);
+    // Post réel (KorosYT, 15/10/2026) : 14 codes déjà gagnés sur Telegram, comptés à part
+    const korosyt = post({
+      title: "KorosYT",
+      text:
+        "Binance Red Packet GW 🎁🎁\n#binance #redpacket #redbox #freeearns #redpacketcode #crypto\n" +
+        "P9CDX6AB\nINVAQ4B2\n99P7M38Z\nJ2Y0OYKD\nPC8WD7DN\n6N8WCJ48\nWIOM3RHK\n73TVCR8R\nLB4J3G53\nTAPFGP77\n" +
+        "Q9TLJQU7\nGN9VZRUB\n28BNIF86\nQAWKI36W\n#crypto #binance #redpackets",
+    });
+    check("post KorosYT : 14 codes", x.extractFromPost(korosyt, { includeKnown: true }).length, 14);
     check("titre (nom du compte) jamais lu comme un code", codes({ title: "AB12CD34", text: "bonjour" }), []);
 
     check(

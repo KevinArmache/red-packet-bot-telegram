@@ -67,6 +67,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Retour des réglages Android : l'écran Santé se met à jour tout de suite
         vm.refreshHealth()
+        // Taux dollar → franc congolais relu s'il date de plus de 6 h
+        vm.refreshCdfRate()
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -79,6 +79,9 @@ class Heartbeat(private val values: Map<String, String>, val writtenAt: Long) {
     val xCodes get() = int("x_codes")
     val xLastAt get() = long("x_last_at")
     val xLastFrom get() = values["x_last_from"] ?: ""
+    /** Codes du dernier post X, dont déjà traités plus tôt (Telegram ou X). */
+    val xLastFound get() = int("x_last_found")
+    val xLastKnown get() = int("x_last_known")
 
     private fun int(key: String) = values[key]?.toIntOrNull() ?: 0
     private fun long(key: String) = values[key]?.toLongOrNull() ?: 0L

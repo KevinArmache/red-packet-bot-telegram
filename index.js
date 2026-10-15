@@ -875,6 +875,9 @@ async function main() {
   // 2. Historique et anti-blocage (compteur, arrêt ⛔ et blocage Binance en
   //    cours survivent aux redémarrages)
   history.loadHistory();
+  // Codes de plus de 48 h oubliés dès le démarrage (pas seulement à minuit) :
+  // un même code republié plus tard sera de nouveau réclamé
+  history.cleanOldCodes();
   activity.load();
   antiban.setHooks({ onChange: onAntibanChange });
   const saved = antiban.init();

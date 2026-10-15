@@ -18,6 +18,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.redpacketbot.app.ClaimEntry
 import com.redpacketbot.app.ui.Format
+import com.redpacketbot.app.ui.LocalMoney
 import com.redpacketbot.app.ui.theme.AppColors
 import com.redpacketbot.app.ui.theme.MonoStyle
 import com.redpacketbot.app.ui.theme.Spacing
@@ -88,14 +89,23 @@ fun ClaimRow(entry: ClaimEntry, modifier: Modifier = Modifier) {
                     maxLines = 1,
                 )
             }
-            // Valeur en dollars du gain (prix public Binance, ou « ≈ $ » affiché par Binance)
+            // Valeur du gain dans la devise choisie (💱 Réglages) : $, FC ou les deux
             if (entry.status == "won") {
+                val money = LocalMoney.current
                 Text(
-                    entry.gainUsd?.let { "≈ ${Format.usd(it)}" } ?: "≈ … $",
+                    entry.gainUsd?.let { "≈ ${money.primary(it)}" } ?: "≈ …",
                     style = MaterialTheme.typography.labelMedium,
                     color = if (entry.gainUsd != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                 )
+                entry.gainUsd?.let { money.secondary(it) }?.let {
+                    Text(
+                        "≈ $it",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }

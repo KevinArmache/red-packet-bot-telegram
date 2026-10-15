@@ -170,15 +170,20 @@ class BotService : Service() {
                 else -> "au repos"
             },
         )
-        if (args?.contains("logs") == true) {
+        // « logs » : 40 dernières lignes ; « logs 2000 » : les 2000 dernières (enquêtes)
+        val logsArg = args?.indexOf("logs") ?: -1
+        if (logsArg >= 0) {
+            val count = (args?.getOrNull(logsArg + 1)?.toIntOrNull() ?: 40).coerceIn(1, 5000)
             out.println("--- logs/bot.log (fin)")
-            lastLogLines(40).forEach(out::println)
+            lastLogLines(count).forEach(out::println)
         }
     }
 
     private fun lastLogLines(count: Int): List<String> = try {
         RandomAccessFile(files.logFile, "r").use { file ->
-            val start = (file.length() - 16 * 1024).coerceAtLeast(0)
+            // ~200 octets par ligne (encadrés, émojis) : fenêtre lue selon le nombre demandé
+            val window = (count * 400L).coerceIn(16 * 1024L, 2 * 1024 * 1024L)
+            val start = (file.length() - window).coerceAtLeast(0)
             file.seek(start)
             val bytes = ByteArray((file.length() - start).toInt())
             file.readFully(bytes)

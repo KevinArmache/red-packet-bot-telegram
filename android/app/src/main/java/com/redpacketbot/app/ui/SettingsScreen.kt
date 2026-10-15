@@ -151,6 +151,9 @@ fun SettingsScreen(vm: BotViewModel, importedEnv: MutableState<String?>, onNavig
                 }
             }
 
+            item { GroupLabel("Affichage") }
+            item { CurrencyCard(vm) }
+
             item { GroupLabel("Alertes et relais") }
             item {
                 SectionCard(title = "🔔 Alertes Telegram", subtitle = "Ton bot créé avec @BotFather") {
@@ -265,6 +268,51 @@ fun SettingsScreen(vm: BotViewModel, importedEnv: MutableState<String?>, onNavig
             },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+    }
+}
+
+/**
+ * 💱 Devise des gains : dollar, franc congolais ou les deux. Appliquée tout de
+ * suite (préférence de l'app, le bot n'est pas redémarré).
+ */
+@Composable
+private fun CurrencyCard(vm: BotViewModel) {
+    val money by vm.money.collectAsStateWithLifecycle()
+    var manual by rememberSaveable { mutableStateOf(money.manualRate?.let { Format.amount(it) } ?: "") }
+    SectionCard(title = "💱 Devise des gains", subtitle = "Appliquée tout de suite, sans redémarrer le bot") {
+        ChoiceGroup(
+            listOf(
+                ChoiceOption(MoneyPrefs.USD, "💵", "Dollar américain ($)"),
+                ChoiceOption(MoneyPrefs.CDF, "🇨🇩", "Franc congolais (FC)"),
+                ChoiceOption(MoneyPrefs.BOTH, "💱", "Les deux", "Dollar en grand, francs congolais dessous"),
+            ),
+            money.mode,
+        ) { vm.setCurrency(it) }
+        if (money.wantsCdf) {
+            val rate = money.cdfRate
+            when {
+                money.manualRate != null -> Hint("✍️ Ton taux : 1 $ = ${Format.cdf(money.manualRate!!)}")
+                money.autoRate != null -> Hint(
+                    "📈 Taux du jour : 1 $ = ${Format.cdf(money.autoRate!!)} · ${Format.ago(money.autoRateAt)} " +
+                        "(open.er-api.com)",
+                )
+                else -> Hint("⏳ Taux en cours de lecture… sans Internet, les montants restent en dollars.", AppColors.warning)
+            }
+            SettingField(
+                "Ton taux (FC pour 1 $), facultatif",
+                manual,
+                {
+                    manual = it
+                    vm.setManualRate(it)
+                },
+                supporting = "Vide = taux du jour. Remplis-le pour utiliser le taux de ton changeur.",
+                keyboard = KeyboardType.Decimal,
+            )
+            if (money.manualRate == null) {
+                TextButton(onClick = { vm.refreshCdfRate(force = true) }) { Text("🔄 Actualiser le taux du jour") }
+            }
+            if (rate != null) Hint("Exemple : 0,30 $ ≈ ${Format.cdf(0.30 * rate)}")
+        }
     }
 }
 

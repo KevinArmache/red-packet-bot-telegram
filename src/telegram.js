@@ -157,6 +157,15 @@ const RE_URL_PARAM = /[?&](?:code|c|cb)=([A-Za-z0-9]{8})(?![A-Za-z0-9])/gi;
 const RE_LABELLED =
   /(?:code|codigo|código|codice|кода?|كود|码|コード)\s*[:：=＝\-–—]?\s*[`"'*_[(]*\s*([A-Za-z0-9]{8})(?![A-Za-z0-9])/gi;
 
+// Code seul sur sa ligne (« OWUVALT5 », « 1. LJSSNXTT », « 🎁 LJSSNXTT ») : la
+// forme des listes de codes publiées sur X et dans beaucoup de canaux.
+// Numérotation et symboles autour sont ignorés ; le code reste en MAJUSCULES.
+const RE_LINE_NUMBER = /^\s*\d{1,2}\s*[.)\-–:]\s*/;
+const RE_LINE_EDGES = /^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g;
+const RE_LINE_CODE = /^[A-Z0-9]{8}$/;
+// … et seulement dans un message qui annonce des codes
+const RE_CODE_CONTEXT = /red\s*packets?|cryptobox|\bcodes?\b|c[oó]digos?|🧧|🎁/i;
+
 // Exclure les messages destinés à d'autres plateformes si Binance n'est pas mentionné
 const IGNORED_EXCHANGES =
   /bybit|okx|bitget|kucoin|mexc|gate\.?io|huobi|htx|bingx/i;
@@ -171,6 +180,9 @@ const STOPWORDS = new Set([
   "CONTRACT", "EXCHANGE", "CURRENCY", "MESSAGES", "CHANNELS", "PLATFORM",
   "SETTINGS", "REWARDED", "FINISHED", "SPONSORS", "DEPOSITS", "FEATURED",
   "SHARING", "WINNERS", "INSTANTLY", "QUANTITY", "SOLDOUTT", "CLAIMNOW",
+  // Mots des listes de codes (X, canaux) : seuls sur une ligne, en majuscules
+  "AIRDROPS", "FOLLOWUS", "GOODLUCK", "GIFTCODE", "REDPACKS", "CODELIST",
+  "NEWCODES", "ALLCODES", "LISTINGS", "BULLRUNS", "DAILYBOX", "FREEBOXS",
   // Français
   "NOUVEAUX", "NOUVELLE", "TOUJOURS", "PARTAGER", "GAGNANTS", "MONTANTS",
   "PATIENCE", "ENSEMBLE", "PERSONNE", "RESULTAT", "GRATUITE", "PREMIERE",
@@ -216,11 +228,15 @@ function isPlausibleCode(code, relaxed) {
  * Binance devient faible.
  *
  * @param {{ plain: string, trusted: string[] }} sources
+ * @param {{ includeKnown?: boolean }} [options] - includeKnown : ne pas écarter
+ *   les codes déjà traités (l'appelant les compte lui-même).
  * @returns {{ code: string, source: 'monospace'|'lien'|'label'|'texte' }[]}
  *   Codes uniques, jamais encore traités.
  */
-function extractCodes(sources) {
+function extractCodes(sources, options = {}) {
   const plain = sources.plain;
+  // includeKnown : garder aussi les codes déjà traités (compte rendu d'un post X)
+  const known = options.includeKnown ? () => false : hasCode;
   if (!plain && sources.trusted.length === 0) return [];
 
   // Message visiblement destiné à un autre exchange → on ignore
@@ -234,7 +250,7 @@ function extractCodes(sources) {
   const add = (candidate, relaxed, source) => {
     const code = candidate.toUpperCase();
     if (!isPlausibleCode(code, relaxed)) return;
-    if (hasCode(code)) return;
+    if (known(code)) return;
     if (!found.has(code)) found.set(code, source);
   };
 
@@ -252,7 +268,25 @@ function extractCodes(sources) {
   // 3. Codes explicitement étiquetés « Code : XXXXXXXX » — niveau souple
   for (const m of plain.matchAll(RE_LABELLED)) add(m[1], true, "label");
 
-  // 4. Texte libre — niveau strict (lettres + chiffres obligatoires)
+  // 4. Code seul sur sa ligne — niveau souple : les codes 100 % lettres
+  //    (« LJSSNXTT », « PABVFEBL ») ne sont plus ratés. Seulement dans un
+  //    message qui annonce des codes, qui n'est QU'une liste de codes, ou qui
+  //    contient déjà un vrai code (lettres + chiffres) seul sur sa ligne.
+  //    Source « texte » : l'anti-blocage le traite comme du texte libre.
+  const lines = plain.split("\n").filter((line) => line.trim());
+  const tokens = lines
+    .map((line) => line.replace(RE_LINE_NUMBER, "").replace(RE_LINE_EDGES, ""))
+    .filter((token) => RE_LINE_CODE.test(token));
+  if (
+    tokens.length > 0 &&
+    (RE_CODE_CONTEXT.test(plain) ||
+      tokens.length === lines.length ||
+      tokens.some((token) => isPlausibleCode(token, false)))
+  ) {
+    for (const token of tokens) add(token, true, "texte");
+  }
+
+  // 5. Texte libre — niveau strict (lettres + chiffres obligatoires)
   for (const m of plain.toUpperCase().matchAll(RE_STRICT)) add(m[0], false, "texte");
 
   return [...found].map(([code, source]) => ({ code, source }));

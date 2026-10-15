@@ -120,6 +120,9 @@ class XNotificationListener : NotificationListenerService() {
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
         val lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)?.toList().orEmpty()
         val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)
+        // Posts avec image (BigPictureStyle) : X y range aussi le texte du post
+        val summaryText = extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)
+        val ticker = notification.tickerText
         val messages = try {
             NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(notification)?.messages.orEmpty()
         } catch (_: Exception) {
@@ -129,6 +132,8 @@ class XNotificationListener : NotificationListenerService() {
         val body = buildList {
             bigText?.let(::add)
             text?.let(::add)
+            summaryText?.let(::add)
+            ticker?.let(::add)
             addAll(lines)
             messages.forEach { m -> m.text?.let(::add) }
         }
@@ -158,6 +163,8 @@ class XNotificationListener : NotificationListenerService() {
             .put("bigText", bigText?.toString() ?: "")
             .put("lines", JSONArray(lines.map { it.toString() }))
             .put("subText", subText?.toString() ?: "")
+            .put("summaryText", summaryText?.toString() ?: "")
+            .put("ticker", ticker?.toString() ?: "")
             .put(
                 "messages",
                 JSONArray(messages.map { m ->

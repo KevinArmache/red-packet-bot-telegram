@@ -316,6 +316,20 @@ private fun XCard(vm: BotViewModel, snapshot: Snapshot, onEdit: () -> Unit) {
             Text("📝 Dernier post vu", style = MaterialTheme.typography.titleSmall)
             Hint("${x.lastFrom.ifBlank { "compte inconnu" }} · ${Format.ago(x.lastPostAt, now)}")
             if (x.lastExcerpt.isNotBlank()) Hint("« ${x.lastExcerpt} »")
+            // Compte rendu du bot pour ce post (même post si l'heure concorde)
+            if (heartbeat != null && heartbeat.xLastAt > 0 && heartbeat.xLastFound > 0) {
+                val known = heartbeat.xLastKnown
+                Hint(
+                    "🎁 ${heartbeat.xLastFound} code(s) dans ce post" + when {
+                        known == 0 -> " : tous nouveaux, envoyés à Binance"
+                        known == heartbeat.xLastFound -> " : tous déjà réclamés plus tôt (Telegram ou X)"
+                        else -> ", dont $known déjà réclamé(s) plus tôt"
+                    },
+                    AppColors.success,
+                )
+            } else if (heartbeat != null && heartbeat.xLastAt > 0) {
+                Hint("Aucun code dans ce post.")
+            }
         } else {
             Hint("📝 Aucun post X reçu depuis le démarrage du bot.")
         }

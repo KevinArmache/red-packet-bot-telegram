@@ -15,6 +15,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
@@ -100,51 +101,55 @@ fun AppRoot(vm: BotViewModel, pendingRoute: MutableState<String?>, importedEnv: 
 
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val showBar = Routes.isTab(route) && !imeVisible
+    val money by vm.money.collectAsStateWithLifecycle()
 
-    Box(Modifier.fillMaxSize()) {
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
-            bottomBar = {
-                if (showBar) {
-                    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                        TABS.forEach { tab ->
-                            NavigationBarItem(
-                                selected = Routes.tabOf(route) == tab.route,
-                                onClick = { go(tab.route) },
-                                icon = { Text(tab.emoji, fontSize = 20.sp) },
-                                label = { Text(tab.label) },
-                                colors = NavigationBarItemDefaults.colors(
-                                    indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                                ),
+    // 💱 Devise choisie dans les Réglages : lue par tous les écrans
+    CompositionLocalProvider(LocalMoney provides money) {
+        Box(Modifier.fillMaxSize()) {
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                bottomBar = {
+                    if (showBar) {
+                        NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+                            TABS.forEach { tab ->
+                                NavigationBarItem(
+                                    selected = Routes.tabOf(route) == tab.route,
+                                    onClick = { go(tab.route) },
+                                    icon = { Text(tab.emoji, fontSize = 20.sp) },
+                                    label = { Text(tab.label) },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+                                        selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                },
+            ) { padding ->
+                Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
+                    Crossfade(targetState = route, label = "screen") { current ->
+                        when (Routes.tabOf(current)) {
+                            Routes.ACTIVITY -> ActivityScreen(vm, startOnLogs = current == Routes.ACTIVITY_LOGS)
+                            Routes.SOURCES -> SourcesScreen(
+                                vm,
+                                focus = current.substringAfter('/', ""),
+                                onNavigate = ::go,
                             )
+                            Routes.SETTINGS -> SettingsScreen(vm, importedEnv, onNavigate = ::go)
+                            Routes.HEALTH -> HealthScreen(vm, onBack = { go(lastTab) })
+                            Routes.WIZARD -> WizardScreen(vm, onDone = {
+                                vm.wizardDone = true
+                                go(Routes.HOME)
+                            })
+                            else -> HomeScreen(vm, onNavigate = ::go)
                         }
                     }
                 }
-            },
-        ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
-                Crossfade(targetState = route, label = "screen") { current ->
-                    when (Routes.tabOf(current)) {
-                        Routes.ACTIVITY -> ActivityScreen(vm, startOnLogs = current == Routes.ACTIVITY_LOGS)
-                        Routes.SOURCES -> SourcesScreen(
-                            vm,
-                            focus = current.substringAfter('/', ""),
-                            onNavigate = ::go,
-                        )
-                        Routes.SETTINGS -> SettingsScreen(vm, importedEnv, onNavigate = ::go)
-                        Routes.HEALTH -> HealthScreen(vm, onBack = { go(lastTab) })
-                        Routes.WIZARD -> WizardScreen(vm, onDone = {
-                            vm.wizardDone = true
-                            go(Routes.HOME)
-                        })
-                        else -> HomeScreen(vm, onNavigate = ::go)
-                    }
-                }
             }
-        }
 
-        WinOverlay(vm)
+            WinOverlay(vm)
+        }
     }
 }
 

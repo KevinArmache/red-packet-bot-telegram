@@ -508,6 +508,7 @@ Les Red Packets Binance font exactement **8 caractères alphanumériques**.
 
 - **Strict**, pour le texte libre : le code doit mélanger lettres **et** chiffres. Sinon, n'importe quel mot de 8 lettres deviendrait un faux positif.
 - **Souple**, seulement pour les sources fiables : blocs `monospace`, « Code : XXXXXXXX » (aussi en espagnol, italien, russe, arabe, chinois, japonais), adresses `cryptobox/…` et paramètres `?code=`. Il accepte aussi les codes **100 % alphabétiques**, environ 10 % des Red Packets. Une liste noire de mots courants et un test de voyelles écartent les vrais mots.
+- **Code seul sur sa ligne**, en MAJUSCULES (« LJSSNXTT », « 1. PABVFEBL », « 🎁 PABVFEBL ») : niveau souple aussi, mais seulement si le message annonce des codes (« red packet », « code », 🎁, 🧧…), n'est qu'une liste de codes, ou contient déjà un autre code lettres + chiffres seul sur sa ligne. C'est la forme des listes publiées sur X et dans beaucoup de canaux. Ces codes restent classés « texte libre » pour l'anti-blocage.
 
 **Toujours rejetés :**
 

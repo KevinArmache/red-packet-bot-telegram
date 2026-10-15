@@ -82,6 +82,8 @@ adb shell dumpsys activity service com.redpacketbot.app/.BotService
                                                  #   forcées : doit rester à 0), coupures Telegram, messages lus
 adb shell dumpsys activity service com.redpacketbot.app/.BotService logs
                                                  # → la même chose + les 40 dernières lignes des logs du bot
+adb shell dumpsys activity service com.redpacketbot.app/.BotService logs 5000
+                                                 # → les 5000 dernières lignes (enquête sur un code raté)
 adb shell "dumpsys package com.redpacketbot.app | grep -E 'versionName|versionCode|lastUpdateTime'"
                                                  # → la version installée (aussi en bas de l'Accueil)
 adb shell pm list packages -U redpacket          # → package:com.redpacketbot.app uid:<UID>
@@ -517,9 +519,33 @@ adb shell cmd notification allow_listener com.redpacketbot.app/com.redpacketbot.
 
 **La vérification.** La ligne `x:` du dumpsys du service affiche `access=true listener=true`. Le réglage reste acquis après une mise à jour de l'app (`adb install -r` ou installation par-dessus).
 
-### Le format réel des notifications de X : à relever
+### Résolu : « des codes ratés » sur X et sur Telegram (15 octobre 2026)
 
-Le format des notifications de X peut changer à chaque mise à jour de l'appli. Au premier essai sur le Camon 40, relève-le avec `dumpsys notification --noredact` (partie 3) pour un post court, un post long, un lien Cryptobox, 3 posts rapides (regroupement), une réponse, et une suggestion de X. Note ici :
+**Le symptôme.** Un post X de KorosYT avec 14 codes « ignoré », LJSSNXTT ignoré dans un post de Sloomo, et PABVFEBL « raté sur @rqbox ».
+
+**Le diagnostic** (`… BotService logs 5000`, puis l'onglet **📜 Activité → 🔍 Rechercher un code**) :
+
+- **KorosYT : rien de raté.** Les 14 codes avaient tous été gagnés via Telegram entre 14:38 et 15:10 ; le post X de 15:39 les republiait. Le bot les ignorait comme doublons, en silence.
+- **LJSSNXTT et PABVFEBL : codes 100 % lettres.** En texte libre, la règle stricte exigeait lettres **et** chiffres : un code tout en lettres n'était pris qu'en monospace, après « Code : » ou dans un lien. Ce n'était pas une régression : ils ont toujours été ratés.
+- **@rqbox** n'était pas dans la liste des canaux : le bot n'en recevait aucun message.
+
+**La solution.**
+
+- Nouvelle règle « **code seul sur sa ligne** » (src/telegram.js) : un code en MAJUSCULES seul sur sa ligne est accepté, lettres seules comprises, si le message annonce des codes, n'est qu'une liste de codes, ou contient déjà un autre code lettres + chiffres seul sur sa ligne. Les mots courants et ceux à 4 voyelles ou plus restent écartés, et l'anti-blocage les traite comme du texte libre.
+- Un post X dont les codes sont déjà traités l'écrit maintenant dans les logs (« 🐦 Post X de … : code(s) déjà traité(s) plus tôt ») et dans **📡 Sources → 🐦 X**.
+- **🔍 Rechercher un code** (📜 Activité → 🎁 Codes) dit tout de suite si un code a été vu, sur quel canal, et ce qu'il est devenu, ou « jamais vu » avec les causes possibles.
+
+### Le format réel des notifications de X (relevé du 15 octobre 2026, X 12.33)
+
+- Canal `<id de ton compte>-tweet_notifications_silent`. Un résumé de groupe (`GROUP_SUMMARY`, sans texte) accompagne les posts : il est ignoré.
+- `android.title` = **nom affiché** du compte (« Sloomo », « Red Packet Code Gift 🧧 »), jamais le @pseudo. `android.subText` = **ton** compte X (« redpacketrdc ») : jamais pris pour l'auteur.
+- Post texte : `BigTextStyle`, texte complet dans `android.text` et `android.bigText`. Post avec image : `BigPictureStyle`, texte dans `android.text` et `android.summaryText` ; vide si le post n'est qu'une image.
+- `when` = heure d'arrivée de la notification, quasi immédiate (1 à 2 s après la publication, mesuré par `posttimeElapsedMs`).
+- Les textes de 14 codes n'étaient pas coupés.
+
+### Le format réel des notifications de X : à surveiller
+
+Le format des notifications de X peut changer à chaque mise à jour de l'appli. Si les codes X cessent d'arriver après une mise à jour de X, relève-le de nouveau avec `dumpsys notification --noredact` (partie 3) et compare avec le relevé ci-dessus. Restent à observer : un post long, un lien Cryptobox, une réponse et une suggestion de X. Vérifie :
 
 - où se trouvent le texte du post (`android.text`, `android.bigText`, `android.textLines`) et le nom du compte (`android.title`, jamais `android.subText`, souvent ton propre compte) ;
 - si X coupe les posts longs (« … ») et si les liens sont des `t.co` ;

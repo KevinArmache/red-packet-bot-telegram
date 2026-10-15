@@ -248,18 +248,23 @@ fun HomeScreen(vm: BotViewModel, onNavigate: (String) -> Unit) {
 private fun StatsGrid(snapshot: Snapshot) {
     val heartbeat = snapshot.liveHeartbeat
     val activity = snapshot.activity
-    // Le total en dollars d'abord (court et lisible), les cryptos en dessous
+    // Le total dans la devise choisie d'abord (court et lisible), les cryptos en dessous
+    val money = LocalMoney.current
     val gains = activity.gainsToday.entries.sortedByDescending { it.value }
     val gainValue = when {
-        activity.gainsTodayUsd > 0 -> "≈ ${Format.usd(activity.gainsTodayUsd)}"
-        gains.isNotEmpty() -> "≈ … $" // prix en cours de lecture
-        else -> "0 $"
+        activity.gainsTodayUsd > 0 -> "≈ ${money.primary(activity.gainsTodayUsd)}"
+        gains.isNotEmpty() -> "≈ …" // prix en cours de lecture
+        else -> money.primary(0.0)
     }
-    val gainCaption = when {
+    val coins = when {
         gains.isEmpty() -> "aujourd'hui"
         gains.size == 1 -> "${Format.amount(gains[0].value)} ${gains[0].key}"
         else -> "${Format.amount(gains[0].value)} ${gains[0].key} + ${gains.size - 1} autre(s)"
     }
+    // Mode « les deux » : la 2e devise en premier sous le montant
+    val gainCaption = money.secondary(activity.gainsTodayUsd)
+        ?.takeIf { activity.gainsTodayUsd > 0 }
+        ?.let { "≈ $it\n$coins" } ?: coins
     val claimed = heartbeat?.claimed ?: 0
     val won = heartbeat?.won ?: 0
 

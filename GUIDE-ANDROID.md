@@ -301,6 +301,10 @@ La notification affiche aussi les codes détectés et gagnés, le compteur anti-
 
 L'**alerte de test** (vérifie que ton bot @BotFather t'écrit bien) est à la dernière étape de l'assistant 🧭 (**⚙️ Réglages** → **Relancer l'assistant de démarrage**).
 
+**🔍 Rechercher un code** (en haut de **📜 Activité → 🎁 Codes**) : tape au moins 4 caractères. L'app cherche dans les derniers codes et dans tout l'historique des logs. Elle dit si le code a été vu, sur quel canal ou compte X, et ce qu'il est devenu (gagné, refusé, laissé au PC, sauté). Sinon, elle affiche « jamais vu » avec les causes possibles : canal absent de ta liste, code seulement en image…
+
+**💱 Devise des gains** (**⚙️ Réglages → Affichage**) : dollar, franc congolais, ou les deux. Le choix s'applique tout de suite, sans redémarrer le bot. Le taux du jour vient d'open.er-api.com (gratuit, mis à jour chaque jour) ; tu peux aussi saisir ton propre taux (celui de ton changeur).
+
 **Les tout petits montants** s'écrivent comme dans les applis crypto : `0,0₆16` veut dire 0, virgule, **6 zéros**, puis 16, soit 0,00000016. Le petit chiffre compte les zéros, pour que le montant tienne à l'écran sans en cacher.
 
 L'app suit le thème du téléphone : **sombre « rouge & or »** si le mode sombre est activé, clair sinon.

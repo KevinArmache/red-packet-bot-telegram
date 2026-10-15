@@ -61,14 +61,21 @@ object Format {
      * Dollars, toujours courts : « 12,40 $ », « 0,30 $ », « 0,0042 $ », et
      * « 0,0₇8 $ » pour un Red Packet minuscule (= 0,00000008 $).
      */
-    fun usd(value: Double): String {
-        if (value <= 0.0 || value.isNaN()) return "0 $"
+    fun usd(value: Double): String = money(value, "$")
+
+    /** Francs congolais : « 2 311 FC », « 54,30 FC », « 0,021 FC ». */
+    fun cdf(value: Double): String = money(value, "FC")
+
+    /** Somme d'argent courte : entiers au-delà de 100, 2 décimales, puis petits montants. */
+    private fun money(value: Double, unit: String): String {
+        if (value <= 0.0 || value.isNaN()) return "0 $unit"
         val text = when {
+            value >= 100 -> String.format(Locale.FRANCE, "%,.0f", value)
             value >= 0.01 -> String.format(Locale.FRANCE, "%,.2f", value)
             value >= TINY -> significant(value)
             else -> tiny(value)
         }
-        return "$text $"
+        return "$text $unit"
     }
 
     /** Gain tel que Binance l'écrit (« 0.00000012 SPELL ») → « 0,0₆12 SPELL ». */

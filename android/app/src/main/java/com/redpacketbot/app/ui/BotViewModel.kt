@@ -24,7 +24,10 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 /** Ce que l'interface sait du bot (relu toutes les secondes). */
 data class Snapshot(
@@ -130,6 +133,72 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
     fun setManualDone(key: String, done: Boolean) {
         healthPrefs.edit().putBoolean(key, done).apply()
         refreshHealth()
+    }
+
+    // ─── Devise d'affichage (💱 Réglages) ───────────────────────────────────
+
+    private val _money = MutableStateFlow(loadMoney())
+    val money: StateFlow<MoneyPrefs> = _money
+
+    init {
+        refreshCdfRate()
+    }
+
+    private fun loadMoney() = MoneyPrefs(
+        mode = uiPrefs.getString("currency", MoneyPrefs.USD) ?: MoneyPrefs.USD,
+        manualRate = uiPrefs.getString("cdfManualRate", null)?.toDoubleOrNull()?.takeIf { it > 0 },
+        autoRate = uiPrefs.getFloat("cdfAutoRate", 0f).toDouble().takeIf { it > 0 },
+        autoRateAt = uiPrefs.getLong("cdfAutoRateAt", 0L),
+    )
+
+    fun setCurrency(mode: String) {
+        uiPrefs.edit().putString("currency", mode).apply()
+        _money.value = loadMoney()
+        refreshCdfRate()
+    }
+
+    /** Taux saisi (FC pour 1 $) ; vide = taux du jour. */
+    fun setManualRate(text: String) {
+        // « 2 850 », « 2850,5 » : espaces ignorés, virgule décimale acceptée
+        val rate = text.filter { it.isDigit() || it == ',' || it == '.' }.replace(',', '.').toDoubleOrNull()
+            ?.takeIf { it > 0 }
+        uiPrefs.edit().apply {
+            if (rate == null) remove("cdfManualRate") else putString("cdfManualRate", rate.toString())
+        }.apply()
+        _money.value = loadMoney()
+    }
+
+    /**
+     * Taux du jour dollar → franc congolais (open.er-api.com, gratuit, sans
+     * clé, mis à jour chaque jour) : relu au plus toutes les 6 h, et seulement
+     * si les francs sont affichés.
+     */
+    fun refreshCdfRate(force: Boolean = false) {
+        val current = _money.value
+        if (!current.wantsCdf) return
+        if (!force && current.autoRate != null && System.currentTimeMillis() - current.autoRateAt < 6 * 3_600_000L) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val rate = fetchCdfRate() ?: return@launch
+            uiPrefs.edit()
+                .putFloat("cdfAutoRate", rate.toFloat())
+                .putLong("cdfAutoRateAt", System.currentTimeMillis())
+                .apply()
+            _money.value = loadMoney()
+        }
+    }
+
+    private fun fetchCdfRate(): Double? = try {
+        val connection = URL("https://open.er-api.com/v6/latest/USD").openConnection() as HttpURLConnection
+        connection.connectTimeout = 8000
+        connection.readTimeout = 8000
+        try {
+            val body = connection.inputStream.use { it.readBytes().decodeToString() }
+            JSONObject(body).optJSONObject("rates")?.optDouble("CDF")?.takeIf { !it.isNaN() && it > 0 }
+        } finally {
+            connection.disconnect()
+        }
+    } catch (_: Exception) {
+        null
     }
 
     // ─── Assistant de démarrage ────────────────────────────────────────────

@@ -101,6 +101,9 @@ function parsePost(data, options = {}) {
   };
   push(data.bigText);
   push(data.text);
+  // Posts avec image (BigPictureStyle) : texte aussi rangé ici par X
+  push(data.summaryText);
+  push(data.ticker);
   for (const line of Array.isArray(data.lines) ? data.lines : []) push(line);
   for (const m of Array.isArray(data.messages) ? data.messages : []) push(m?.text);
 
@@ -193,10 +196,13 @@ function cleanTweet(text) {
     .trim();
 }
 
-/** Codes d'un post (règles de src/telegram.js, aucun segment monospace sur X). */
-function extractFromPost(post) {
+/**
+ * Codes d'un post (règles de src/telegram.js, aucun segment monospace sur X).
+ * @param {{ includeKnown?: boolean }} [options] - garder les codes déjà traités
+ */
+function extractFromPost(post, options = {}) {
   const plain = [cleanTweet(post.text), ...post.urls].filter(Boolean).join("\n");
-  return extractCodes({ plain, trusted: [] });
+  return extractCodes({ plain, trusted: [] }, options);
 }
 
 /**
@@ -238,7 +244,8 @@ function isFreshRelay(stamp, serverNow, maxMs = RELAY_MAX_AGE_MS) {
 // ─── Fonctionnement ─────────────────────────────────────────────────────────
 
 const ACCOUNTS = parseAccounts(process.env.X_ACCOUNTS);
-const state = { startedAt: Date.now(), lastAt: 0, lastFrom: "" };
+/** lastFound / lastKnown : codes du dernier post, dont déjà traités. */
+const state = { startedAt: Date.now(), lastAt: 0, lastFrom: "", lastFound: 0, lastKnown: 0 };
 
 /** @type {import('@mtcute/node').TelegramClient | null} */
 let client = null;
@@ -310,7 +317,22 @@ function handlePost(data) {
     return;
   }
 
-  for (const { code, source } of extractFromPost(post)) {
+  // Codes déjà traités (souvent publiés plus tôt sur Telegram) : comptés et
+  // annoncés, pour qu'un post X sans réclamation ne passe pas pour un raté
+  const found = extractFromPost(post, { includeKnown: true });
+  const known = found.filter(({ code }) => history.hasCode(code) || history.isProcessing(code)).length;
+  state.lastFound = found.length;
+  state.lastKnown = known;
+  if (known > 0) {
+    logger.info(
+      `🐦 Post X de ${from} : ${known === found.length ? "" : `${known} sur ${found.length} `}` +
+        `code(s) déjà traité(s) plus tôt (Telegram ou X) — rien à refaire`,
+    );
+  } else if (found.length === 0) {
+    logger.debug(`🐦 Post X de ${from} : aucun code`);
+  }
+
+  for (const { code, source } of found) {
     if (history.hasCode(code) || history.isProcessing(code)) {
       stats.bump("codesDuplicate");
       continue;
@@ -442,6 +464,8 @@ function heartbeatLines() {
     `x_codes=${stats.state.xCodes + stats.state.xRelayed}`,
     `x_last_at=${state.lastAt}`,
     `x_last_from=${state.lastFrom.replace(/[\r\n=]/g, " ")}`,
+    `x_last_found=${state.lastFound}`,
+    `x_last_known=${state.lastKnown}`,
   ];
 }
 
