@@ -167,5 +167,9 @@ private fun WinOverlay(vm: BotViewModel) {
             if (System.currentTimeMillis() - at < 5 * 60_000L) showing = latestWin
         }
     }
-    showing?.let { entry -> WinCelebration(entry, onDone = { showing = null }) }
+    showing?.let { shown ->
+        // Version à jour du gain : sa valeur en dollars arrive quelques secondes après
+        val entry = snapshot.activity.items.firstOrNull { it.code == shown.code && it.at == shown.at } ?: shown
+        WinCelebration(entry, onDone = { showing = null })
+    }
 }

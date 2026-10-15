@@ -2,6 +2,11 @@ package com.redpacketbot.app.ui
 
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
+import kotlin.math.log10
+import kotlin.math.pow
+import kotlin.math.roundToLong
 
 /** Formats d'affichage en français. */
 object Format {
@@ -36,24 +41,67 @@ object Format {
         else -> String.format(Locale.FRANCE, "%.1f s", ms / 1000.0)
     }
 
-    /** Montant d'une crypto : « 0,0009 », « 12,5 », « 1 250 ». */
+    /**
+     * Montant d'une crypto, toujours court : « 1 250 », « 12,5 », « 0,0009 »,
+     * et pour les tout petits montants « 0,0₆12 » (= 0,00000012 : le petit
+     * chiffre compte les zéros, comme dans les applis crypto).
+     */
     fun amount(value: Double): String {
         val a = abs(value)
-        val digits = when {
-            a == 0.0 -> 0
-            a >= 100 -> 0
-            a >= 1 -> 2
-            a >= 0.01 -> 4
-            else -> 8
+        return when {
+            a == 0.0 || a.isNaN() -> "0"
+            a >= 100 -> String.format(Locale.FRANCE, "%,.0f", value)
+            a >= 1 -> trimmed(String.format(Locale.FRANCE, "%,.2f", value))
+            a >= TINY -> significant(value)
+            else -> tiny(value)
         }
-        val text = String.format(Locale.FRANCE, "%,.${digits}f", value)
-        return if (digits > 0) text.trimEnd('0').trimEnd(',') else text
     }
 
-    /** Dollars : « 0,30 $ », « < 0,01 $ ». */
-    fun usd(value: Double): String = when {
-        value <= 0.0 -> "0 $"
-        value < 0.01 -> "< 0,01 $"
-        else -> String.format(Locale.FRANCE, "%,.2f $", value)
+    /**
+     * Dollars, toujours courts : « 12,40 $ », « 0,30 $ », « 0,0042 $ », et
+     * « 0,0₇8 $ » pour un Red Packet minuscule (= 0,00000008 $).
+     */
+    fun usd(value: Double): String {
+        if (value <= 0.0 || value.isNaN()) return "0 $"
+        val text = when {
+            value >= 0.01 -> String.format(Locale.FRANCE, "%,.2f", value)
+            value >= TINY -> significant(value)
+            else -> tiny(value)
+        }
+        return "$text $"
+    }
+
+    /** Gain tel que Binance l'écrit (« 0.00000012 SPELL ») → « 0,0₆12 SPELL ». */
+    fun gain(raw: String): String {
+        val m = Regex("([0-9]+(?:[.,][0-9]+)?)\\s*([A-Z][A-Z0-9]{1,9})").find(raw) ?: return raw
+        val value = m.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return raw
+        return "${amount(value)} ${m.groupValues[2]}"
+    }
+
+    /** En dessous, les zéros sont comptés en indice (0,0₄12). */
+    private const val TINY = 0.0001
+    private const val SUBSCRIPT = "₀₁₂₃₄₅₆₇₈₉"
+
+    private fun trimmed(text: String) = text.trimEnd('0').trimEnd(',')
+
+    /** Deux chiffres significatifs : 0,0042 · 0,012 · 0,5. */
+    private fun significant(value: Double): String {
+        val decimals = (ceil(-log10(abs(value))).toInt() + 1).coerceIn(1, 6)
+        return trimmed(String.format(Locale.FRANCE, "%.${decimals}f", value))
+    }
+
+    /** 0,00000012 → « 0,0₆12 » : 0, virgule, 6 zéros, puis les chiffres utiles. */
+    private fun tiny(value: Double): String {
+        val a = abs(value)
+        val exponent = floor(log10(a)).toInt() // 1,2e-7 → -7
+        var zeros = -exponent - 1
+        var digits = (a / 10.0.pow(exponent - 1)).roundToLong() // 2 chiffres : 12
+        if (digits >= 100) { // arrondi 9,96 → 10,0 : un zéro de moins
+            digits /= 10
+            zeros -= 1
+        }
+        val count = zeros.toString().map { SUBSCRIPT[it - '0'] }.joinToString("")
+        val sign = if (value < 0) "-" else ""
+        return "${sign}0,0$count${digits.toString().trimEnd('0').ifEmpty { "0" }}"
     }
 }

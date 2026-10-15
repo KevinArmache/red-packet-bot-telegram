@@ -294,12 +294,14 @@ La notification affiche aussi les codes détectés et gagnés, le compteur anti-
 
 **Les 4 onglets :**
 
-- **🏠 Accueil** : le bouton d'état, le **relais 💻 PC ⇄ 📱 téléphone** (l'appareil qui réclame est entouré d'or), les chiffres (💰 gains du jour par crypto et en dollars quand Binance les affiche, 🏆 gagnés, 🎁 détectés, 🎯 réussite, ⚡ délai avant saisie, ❌ refusés), le graphique des codes sur 24 h, la **jauge anti-blocage** (10 cases : or, puis orange au seuil « codes clairs », rouge à l'arrêt, 🔒 le blocage Binance jamais atteint) et les 5 derniers codes. Quand un code est gagné app ouverte, une enveloppe 🧧 s'ouvre à l'écran.
-- **📜 Activité** : **🎁 Codes**, les 50 derniers codes avec leur origine (✈️ TG ou 🐦 X) et leur résultat ; **🖥️ Logs**, ce que fait le bot en direct, avec des filtres (Tout, Codes, Erreurs). **Copier** et **Partager** servent à demander de l'aide.
+- **🏠 Accueil** : le bouton d'état, le **relais 💻 PC ⇄ 📱 téléphone** (l'appareil qui réclame est entouré d'or), les chiffres (💰 gains du jour en dollars, avec le détail par crypto dessous, 🏆 gagnés, 🎁 détectés, 🎯 réussite, ⚡ délai avant saisie, ❌ refusés), le graphique des codes sur 24 h, la **jauge anti-blocage** (10 cases : or, puis orange au seuil « codes clairs », rouge à l'arrêt, 🔒 le blocage Binance jamais atteint) et les 5 derniers codes. Quand un code est gagné app ouverte, une enveloppe 🧧 s'ouvre à l'écran.
+- **📜 Activité** : **🎁 Codes**, les 50 derniers codes avec leur origine (✈️ TG ou 🐦 X) et leur résultat, et pour chaque Red Packet gagné sa **valeur en dollars** (prix public de Binance au moment du gain), plus les totaux du jour et depuis le début ; **🖥️ Logs**, ce que fait le bot en direct, avec des filtres (Tout, Codes, Erreurs). **Copier** et **Partager** servent à demander de l'aide.
 - **📡 Sources** : connexions Telegram et Binance, chaque canal avec ses codes et son dernier message (les canaux muets depuis 7 jours sont signalés), et la carte 🐦 X.
 - **⚙️ Réglages** : tous les réglages, la Santé, l'assistant 🧭 et « À propos ».
 
 L'**alerte de test** (vérifie que ton bot @BotFather t'écrit bien) est à la dernière étape de l'assistant 🧭 (**⚙️ Réglages** → **Relancer l'assistant de démarrage**).
+
+**Les tout petits montants** s'écrivent comme dans les applis crypto : `0,0₆16` veut dire 0, virgule, **6 zéros**, puis 16, soit 0,00000016. Le petit chiffre compte les zéros, pour que le montant tienne à l'écran sans en cacher.
 
 L'app suit le thème du téléphone : **sombre « rouge & or »** si le mode sombre est activé, clair sinon.
 

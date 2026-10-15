@@ -43,6 +43,7 @@ import com.redpacketbot.app.ui.components.ClaimRow
 import com.redpacketbot.app.ui.components.EmptyState
 import com.redpacketbot.app.ui.components.ScreenHeader
 import com.redpacketbot.app.ui.components.SectionCard
+import com.redpacketbot.app.ui.components.StatCard
 import com.redpacketbot.app.ui.theme.AppColors
 import com.redpacketbot.app.ui.theme.MonoStyle
 import com.redpacketbot.app.ui.theme.Spacing
@@ -86,7 +87,25 @@ private fun CodesPanel(vm: BotViewModel) {
         )
         return
     }
+    val activity = snapshot.activity
     LazyColumn(contentPadding = PaddingValues(bottom = Spacing.xl), verticalArrangement = Arrangement.spacedBy(Spacing.m)) {
+        item {
+            // Gains en dollars : aujourd'hui, au total, et le détail par crypto
+            SectionCard(title = "💰 Gains en dollars", subtitle = "Prix public Binance au moment du gain") {
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                    StatCard("📅", "≈ ${Format.usd(activity.gainsTodayUsd)}", "aujourd'hui", Modifier.weight(1f), accent = AppColors.gold)
+                    StatCard("🏦", "≈ ${Format.usd(activity.gainsTotalUsd)}", "au total", Modifier.weight(1f), accent = AppColors.gold)
+                }
+                if (activity.gainsTotal.isNotEmpty()) {
+                    Text(
+                        activity.gainsTotal.entries.sortedByDescending { it.value }
+                            .joinToString(" · ") { "${Format.amount(it.value)} ${it.key}" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
         item {
             SectionCard {
                 items.forEachIndexed { index, entry ->

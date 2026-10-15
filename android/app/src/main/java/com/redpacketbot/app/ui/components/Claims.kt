@@ -76,7 +76,7 @@ fun ClaimRow(entry: ClaimEntry, modifier: Modifier = Modifier) {
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Pill(label, color)
             val extra = when {
-                entry.status == "won" && entry.gain.isNotBlank() -> "+" + entry.gain
+                entry.status == "won" && entry.gain.isNotBlank() -> "+" + Format.gain(entry.gain)
                 entry.latencyMs != null -> "⚡ " + Format.latency(entry.latencyMs)
                 else -> null
             }
@@ -85,6 +85,15 @@ fun ClaimRow(entry: ClaimEntry, modifier: Modifier = Modifier) {
                     it,
                     style = MaterialTheme.typography.labelSmall,
                     color = if (entry.status == "won") AppColors.gold else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+            // Valeur en dollars du gain (prix public Binance, ou « ≈ $ » affiché par Binance)
+            if (entry.status == "won") {
+                Text(
+                    entry.gainUsd?.let { "≈ ${Format.usd(it)}" } ?: "≈ … $",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (entry.gainUsd != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                 )
             }

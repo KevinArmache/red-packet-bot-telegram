@@ -502,6 +502,21 @@ Le PC annonce qu'il prend les codes X par le jeton ` x=1` de sa ligne `#botrelay
 3. Sur le PC, un `#xcode` tapé à la main dans les Messages enregistrés doit donner 🎁 puis 🧪 :
    `#xcode AB12CD34 src=label from=@test at=1800000000000 inst=00000000 dry=1` (remplace `at` par l'heure actuelle en millisecondes ; le bot juge sur la date du message).
 
+### Résolu : l'interrupteur « Accès aux notifications » refuse de s'activer
+
+**Le symptôme (15 octobre 2026, Camon 40, Android 16).** Dans **Réglages → Accès aux notifications**, l'interrupteur de Red Packet Bot refuse de s'activer, comme si l'app n'avait pas l'autorisation.
+
+**La cause.** L'APK a été installée depuis un fichier (`installerPackageName=com.google.android.packageinstaller`), pas depuis le Play Store. Android range alors l'accès aux notifications parmi les **paramètres restreints** et le refuse : `cmd appops get com.redpacketbot.app ACCESS_RESTRICTED_SETTINGS` donnait `ignore; rejectTime=+3m…` (refus 3 min plus tôt).
+
+**La solution.** Sur le téléphone : **Réglages → Applis → Red Packet Bot → ⋮ → Autoriser les paramètres restreints**, puis réactiver l'interrupteur. Ou par câble, en une fois :
+
+```bash
+adb shell cmd appops set com.redpacketbot.app ACCESS_RESTRICTED_SETTINGS allow
+adb shell cmd notification allow_listener com.redpacketbot.app/com.redpacketbot.app.XNotificationListener
+```
+
+**La vérification.** La ligne `x:` du dumpsys du service affiche `access=true listener=true`. Le réglage reste acquis après une mise à jour de l'app (`adb install -r` ou installation par-dessus).
+
 ### Le format réel des notifications de X : à relever
 
 Le format des notifications de X peut changer à chaque mise à jour de l'appli. Au premier essai sur le Camon 40, relève-le avec `dumpsys notification --noredact` (partie 3) pour un post court, un post long, un lien Cryptobox, 3 posts rapides (regroupement), une réponse, et une suggestion de X. Note ici :

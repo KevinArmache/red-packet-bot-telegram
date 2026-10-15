@@ -637,6 +637,7 @@ red-packet-bot-telegram/
 │   ├── relay.js           # Relais PC ⇄ téléphone (message #botrelay)
 │   ├── xsource.js         # Codes publiés sur X (notifications de l'appli X, relais #xcode)
 │   ├── activity.js        # Journal d'activité de l'app (derniers codes, gains, stats par source)
+│   ├── prices.js          # Valeur en dollars des gains (prix public Binance, sans clé)
 │   ├── notifier.js        # Alertes via ton bot @BotFather
 │   ├── queue.js           # File d'attente : un code à la fois
 │   ├── history.js         # Anti-doublons 48 h (history.json)

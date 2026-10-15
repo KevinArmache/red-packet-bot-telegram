@@ -8,7 +8,8 @@
  * ║  vie), écrit seulement dans l'app (BOT_HEARTBEAT_FILE posé) :            ║
  * ║   • items   : les 50 derniers codes et leur résultat ;                   ║
  * ║   • hours   : codes détectés / gagnés par heure (48 h) → graphique 24 h ;║
- * ║   • gains   : montants gagnés par crypto, aujourd'hui et au total ;      ║
+ * ║   • gains   : montants gagnés par crypto, aujourd'hui et au total, et    ║
+ * ║               leur valeur en dollars (prix public Binance) ;            ║
  * ║   • sources : par canal Telegram et par compte X (détectés, gagnés,      ║
  * ║               dernier message vu).                                       ║
  * ║  Écriture atomique et regroupée : jamais plus d'une toutes les 2 s.      ║
@@ -19,6 +20,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { priceUsd } = require("./prices");
 
 const HEARTBEAT_FILE = (process.env.BOT_HEARTBEAT_FILE ?? "").trim();
 const FILE = HEARTBEAT_FILE ? path.join(path.dirname(HEARTBEAT_FILE), "activity.json") : "";
@@ -75,6 +77,25 @@ function load() {
     /* absent ou illisible : on repart de zéro */
   }
   rollDay();
+  // Gains enregistrés sans valeur en dollars (prix indisponible à ce moment-là)
+  for (const item of data.items) {
+    if (item.status === "won" && !Number.isFinite(item.gainUsd)) void fillUsd(item);
+  }
+}
+
+/**
+ * Valeur en dollars d'un gain : « ≈ $ » lu sur Binance, sinon prix public de
+ * Binance (src/prices.js). Ajoutée au gain et aux totaux, puis écrite.
+ */
+async function fillUsd(item) {
+  const parsed = parseGain(item.gain);
+  if (!parsed) return;
+  const price = await priceUsd(parsed.coin);
+  if (!price || Number.isFinite(item.gainUsd)) return;
+  item.gainUsd = parsed.amount * price;
+  data.gains.totalUsd += item.gainUsd;
+  if (dayKey(item.at) === data.gains.day) data.gains.todayUsd += item.gainUsd;
+  save();
 }
 
 function writeNow() {
@@ -215,6 +236,8 @@ function record(code, meta = {}, status, extra = {}) {
     if (item.gainUsd !== null) {
       data.gains.todayUsd += item.gainUsd;
       data.gains.totalUsd += item.gainUsd;
+    } else {
+      void fillUsd(item);
     }
   }
   save();

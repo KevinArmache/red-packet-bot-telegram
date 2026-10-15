@@ -93,9 +93,18 @@ fun StatCard(
             Spacer(Modifier.size(6.dp))
             Text(
                 value,
-                style = NumberStyle,
+                // Taille adaptée à la longueur : un montant n'est jamais coupé
+                style = NumberStyle.copy(
+                    fontSize = when {
+                        value.length <= 7 -> 24.sp
+                        value.length <= 10 -> 19.sp
+                        value.length <= 13 -> 16.sp
+                        else -> 14.sp
+                    },
+                ),
                 color = accent ?: MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
+                softWrap = false,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)

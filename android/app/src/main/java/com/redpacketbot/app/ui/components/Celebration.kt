@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.redpacketbot.app.ClaimEntry
+import com.redpacketbot.app.ui.Format
 import com.redpacketbot.app.ui.theme.AppColors
 import com.redpacketbot.app.ui.theme.MonoStyle
 import kotlinx.coroutines.delay
@@ -132,7 +133,10 @@ fun WinCelebration(entry: ClaimEntry, onDone: () -> Unit) {
             }
             Text("Gagné !", style = MaterialTheme.typography.headlineSmall, color = AppColors.gold)
             if (entry.gain.isNotBlank()) {
-                Text("+${entry.gain}", style = MaterialTheme.typography.displaySmall, color = Color.White, textAlign = TextAlign.Center)
+                Text("+${Format.gain(entry.gain)}", style = MaterialTheme.typography.displaySmall, color = Color.White, textAlign = TextAlign.Center)
+            }
+            entry.gainUsd?.let {
+                Text("≈ ${Format.usd(it)}", style = MaterialTheme.typography.titleLarge, color = AppColors.gold)
             }
             Text(
                 entry.code + if (entry.channel.isNotBlank()) " · ${entry.channel}" else "",

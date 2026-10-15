@@ -248,12 +248,18 @@ fun HomeScreen(vm: BotViewModel, onNavigate: (String) -> Unit) {
 private fun StatsGrid(snapshot: Snapshot) {
     val heartbeat = snapshot.liveHeartbeat
     val activity = snapshot.activity
+    // Le total en dollars d'abord (court et lisible), les cryptos en dessous
     val gains = activity.gainsToday.entries.sortedByDescending { it.value }
-    val gainValue = gains.firstOrNull()?.let { "${Format.amount(it.value)} ${it.key}" } ?: "0"
-    val gainCaption = buildList {
-        if (activity.gainsTodayUsd > 0) add("≈ ${Format.usd(activity.gainsTodayUsd)}")
-        if (gains.size > 1) add("+ ${gains.size - 1} autre(s) crypto")
-    }.joinToString(" · ").ifEmpty { "aujourd'hui" }
+    val gainValue = when {
+        activity.gainsTodayUsd > 0 -> "≈ ${Format.usd(activity.gainsTodayUsd)}"
+        gains.isNotEmpty() -> "≈ … $" // prix en cours de lecture
+        else -> "0 $"
+    }
+    val gainCaption = when {
+        gains.isEmpty() -> "aujourd'hui"
+        gains.size == 1 -> "${Format.amount(gains[0].value)} ${gains[0].key}"
+        else -> "${Format.amount(gains[0].value)} ${gains[0].key} + ${gains.size - 1} autre(s)"
+    }
     val claimed = heartbeat?.claimed ?: 0
     val won = heartbeat?.won ?: 0
 

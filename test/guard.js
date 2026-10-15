@@ -441,6 +441,41 @@ async function main() {
     check("montant illisible", activity.parseGain("montant à vérifier sur Binance"), null);
   }
 
+  // ─── Valeur en dollars des gains (prix public Binance, réseau simulé) ─────
+  section("Valeur en dollars : prix public Binance");
+  {
+    const { priceUsd } = require("../src/prices");
+    const calls = [];
+    /** Faux réseau : prix par paire, 400 pour une paire inconnue, panne du 1er hôte si demandé. */
+    const fakeFetch = (prices, { firstHostDown = false } = {}) => async (url) => {
+      calls.push(url);
+      if (firstHostDown && url.startsWith("https://api.binance.com")) throw new Error("ECONNRESET");
+      const symbol = new URL(url).searchParams.get("symbol");
+      if (!(symbol in prices)) return { ok: false, status: 400, json: async () => ({ code: -1121 }) };
+      return { ok: true, status: 200, json: async () => ({ symbol, price: String(prices[symbol]) }) };
+    };
+    let t = 1_000_000;
+    const at = () => (t += 120_000); // cache d'1 min : chaque cas repart de zéro
+
+    check("stablecoin = 1 $", await priceUsd("USDT", { fetchImpl: fakeFetch({}), now: at() }), 1);
+    check("paire /USDT", await priceUsd("SPELL", { fetchImpl: fakeFetch({ SPELLUSDT: 0.0005 }), now: at() }), 0.0005);
+    check("repli sur /USDC", await priceUsd("ABC", { fetchImpl: fakeFetch({ ABCUSDC: 2 }), now: at() }), 2);
+    check(
+      "repli /BTC × BTC/USDT",
+      await priceUsd("XYZ", { fetchImpl: fakeFetch({ XYZBTC: 0.00001, BTCUSDT: 60000 }), now: at() }),
+      0.6000000000000001,
+    );
+    check("crypto inconnue : null", await priceUsd("NOPE", { fetchImpl: fakeFetch({}), now: at() }), null);
+    calls.length = 0;
+    check(
+      "premier hôte en panne : miroir data-api",
+      await priceUsd("DOGE", { fetchImpl: fakeFetch({ DOGEUSDT: 0.2 }, { firstHostDown: true }), now: at() }),
+      0.2,
+    );
+    check("le miroir a bien été appelé", calls.some((u) => u.startsWith("https://data-api.binance.vision")), true);
+    check("nom de crypto invalide : null", await priceUsd("../x", { fetchImpl: fakeFetch({}), now: at() }), null);
+  }
+
   console.log(
     failures
       ? `\n❌ ${failures} vérification(s) en échec sur ${checks}\n`
