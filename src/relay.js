@@ -65,6 +65,8 @@ const CODES_RE = /^codes=([A-Z0-9,]*)\s*$/m;
 // Compteur anti-blocage (src/antiban.js), à la suite de la ligne #botrelay :
 // les versions précédentes ignorent ces jetons
 const ANTIBAN_RE = /#botrelay\b[^\n]*?\sfails=(\d+)\s+failsAt=(\d+)(?:\s+halt=([01]))?/i;
+// Cet appareil réclame les codes X relayés par le téléphone (#xcode, src/xsource.js)
+const ACCEPTS_X_RE = /#botrelay\b[^\n]*?\sx=1(?:\s|$)/im;
 
 function normalizeRole(raw) {
   const role = String(raw ?? "primary").trim().toLowerCase();
@@ -112,7 +114,7 @@ let confirming = false;
 // ── L'autre appareil ────────────────────────────────────────────────────────
 // at : réception locale du dernier signal · serverTs : heure serveur de ce signal
 // known : état connu (recherche réussie ou message reçu)
-const peer = { at: 0, serverTs: 0, state: null, inst: null, known: false };
+const peer = { at: 0, serverTs: 0, state: null, inst: null, known: false, acceptsX: false };
 let searchFailures = 0;
 let lastSearchOkAt = 0;
 
@@ -151,6 +153,7 @@ function parseStatus(text) {
     antiban: guard
       ? { fails: Number(guard[1]) || 0, failsAt: Number(guard[2]) || 0, halted: guard[3] === "1" }
       : null,
+    acceptsX: ACCEPTS_X_RE.test(text ?? ""),
   };
 }
 
@@ -183,6 +186,21 @@ function whyNotClaiming(postedAt) {
     return "publié avant la prise de relais — l'autre appareil en était responsable";
   }
   return "relais";
+}
+
+/**
+ * L'autre appareil réclame-t-il les codes X relayés (#xcode) ?
+ * @returns {boolean|null} null si son état n'est pas connu (ou trop ancien).
+ */
+function peerAcceptsX() {
+  if (ROLE === "solo" || !peerFresh()) return null;
+  return peer.acceptsX === true;
+}
+
+/** État de l'autre appareil, pour l'app (carte PC ⇄ téléphone). */
+function peerInfo() {
+  if (ROLE === "solo" || !peer.known) return { state: "", at: 0 };
+  return { state: peer.state ?? "", at: peer.at };
 }
 
 /** Le navigateur doit-il tourner ? (téléphone en veille : non, mémoire libérée) */
@@ -228,6 +246,7 @@ function describeMode() {
  *   compteur anti-blocage de cet appareil (failsAt en heure locale)
  * @param {(state: { fails: number, failsAt: number, halted: boolean }, fromRole: string) => void} [cb.onPeerAntiban]
  *   compteur publié par l'autre appareil (failsAt converti en heure locale)
+ * @param {() => boolean} [cb.acceptsX] cet appareil réclame les codes X relayés (#xcode)
  */
 async function start(client, cb = {}) {
   if (ROLE === "solo") {
@@ -352,6 +371,7 @@ function handleSelfMessage(msg) {
   peer.serverTs = Number.isFinite(stamp) ? stamp : serverNow();
   peer.state = info.state;
   peer.inst = info.instance;
+  peer.acceptsX = info.acceptsX;
   peer.known = true;
   if (started) evaluate();
 }
@@ -463,6 +483,7 @@ function applyFound(found) {
     peer.serverTs = latestPeer.stamp;
     peer.state = latestPeer.info.state;
     peer.inst = latestPeer.info.instance;
+    peer.acceptsX = latestPeer.info.acceptsX;
     peer.at = Date.now() - Math.max(0, serverNow() - latestPeer.stamp);
   }
 }
@@ -538,13 +559,14 @@ function renderStatus(current) {
     ? ` fails=${guard.fails} failsAt=${guard.failsAt ? Math.round(guard.failsAt + clockOffset) : 0}` +
       ` halt=${guard.halted ? 1 : 0}`
     : "";
+  const xToken = callbacks.acceptsX?.() ? " x=1" : "";
   const lines = [
     `🤖 Relais Red Packet — ${notifier.LABEL}`,
     `${describeState(current)} · ${consequence(current)}`,
     `Dernier signal : ${fmtClock(Date.now())}`,
     "",
     `${TAG} role=${ROLE} state=${current.state} pause=${current.pauseUntil} ` +
-      `inst=${INSTANCE} since=${owner ? ownerSince : 0}${guardTokens}`,
+      `inst=${INSTANCE} since=${owner ? ownerSince : 0}${guardTokens}${xToken}`,
   ];
   if (myCodes.size > 0) lines.push(`codes=${[...myCodes.keys()].join(",")}`);
   return lines.join("\n");
@@ -825,6 +847,8 @@ function applySharedPause(until, fromRole) {
 
 module.exports = {
   ROLE,
+  INSTANCE,
+  serverNow,
   canClaim,
   whyNotClaiming,
   shouldRunBrowser,
@@ -839,6 +863,8 @@ module.exports = {
   recordClaim,
   announcePause,
   announceAntiban,
+  peerAcceptsX,
+  peerInfo,
   statsRows,
   // Exposé pour les tests
   parseStatus,

@@ -292,6 +292,11 @@ async function main() {
       relay.parseStatus("#botrelay role=backup state=standby pause=0 inst=aa11bb22 since=0").antiban,
       null,
     );
+    check("PC sans jeton x=1 : codes X non annoncés", info.acceptsX, false);
+    const withX = relay.parseStatus(text.replace("halt=1", "halt=1 x=1"));
+    check("jeton x=1 lu", withX.acceptsX, true);
+    check("jetons anti-blocage toujours lus avec x=1", withX.antiban, { fails: 3, failsAt: 1791400100000, halted: true });
+    check("registre intact avec x=1", withX.codes, ["ABCD1234", "EFGH5678"]);
   }
 
   // ─── Extraction : source de chaque code ───────────────────────────────────
@@ -319,6 +324,121 @@ async function main() {
     );
     check("code BP de 10 caractères ignoré", extractCodes({ plain: "Red packet BPUB4ALVZP", trusted: ["BPJ09HYNNK"] }), []);
     check("« BP » de 8 caractères ignoré", extractCodes({ plain: "Code : BPVV80RZ", trusted: ["BPVV80RZ"] }), []);
+  }
+
+  // ─── X (Twitter) : posts lus dans les notifications, relais #xcode ────────
+  section("X (Twitter) : posts et relais #xcode");
+  {
+    const x = require("../src/xsource");
+    const T0 = 1_800_000_000_000;
+    const post = (fields) => x.parsePost({ pkg: "com.twitter.android", postedAt: T0, ...fields });
+    const codes = (fields) => x.extractFromPost(post(fields));
+
+    check("liste de comptes", x.parseAccounts("@Binance, cz_binance\n@foo;;@foo nope!"), ["binance", "cz_binance", "foo"]);
+    check(
+      "« Code : » dans un post",
+      codes({ title: "Binance", text: "🧧 Code : AB12CD34 #Binance @binance https://t.co/xyz" }),
+      [{ code: "AB12CD34", source: "label" }],
+    );
+    check("mentions, hashtags et cashtags ignorés", codes({ text: "@crypto12 #BNB2025X $ABCD1234" }), []);
+    check("code coupé par X (« … ») ignoré", codes({ text: "Red packet pour vous AB12CD3…" }), []);
+    check(
+      "code complet puis texte coupé",
+      codes({ text: "AB12CD34 vite, premier arrivé premier serv…" }),
+      [{ code: "AB12CD34", source: "texte" }],
+    );
+    check("codes BP et 8 chiffres ignorés", codes({ text: "BPVV80RZ 12345678" }), []);
+    check(
+      "lien Cryptobox caché derrière t.co",
+      codes({
+        text: "Red Packet 🎁 https://t.co/abc",
+        urls: ["https://www.binance.com/fr/my/wallet/account/payment/cryptobox/LM34NP56"],
+      }),
+      [{ code: "LM34NP56", source: "lien" }],
+    );
+    check("autre exchange ignoré", codes({ text: "Bybit gift code: QW12ER34" }), []);
+    check("titre (nom du compte) jamais lu comme un code", codes({ title: "AB12CD34", text: "bonjour" }), []);
+
+    check(
+      "bigText prioritaire, text inclus non répété",
+      post({ text: "Code : AB12", bigText: "Code : AB12CD34 complet" }).text,
+      "Code : AB12CD34 complet",
+    );
+    check("lignes réunies", post({ lines: ["un", "deux"] }).text, "un\ndeux");
+    check("notification vide ignorée", post({ text: "  " }), null);
+    check("sans heure : ignorée", x.parsePost({ pkg: "com.twitter.android", text: "x" }), null);
+    check(
+      "autre appli ignorée",
+      x.parsePost({ pkg: "org.telegram.messenger", text: "Code : AB12CD34", postedAt: T0 }),
+      null,
+    );
+    check("notification adb refusée hors essai à blanc", x.parsePost({ pkg: "com.android.shell", text: "x", postedAt: T0 }), null);
+    check(
+      "notification adb acceptée en essai à blanc",
+      Boolean(x.parsePost({ pkg: "com.android.shell", text: "x", postedAt: T0 }, { allowTest: true })),
+      true,
+    );
+
+    const binancePost = post({ title: "Binance", subText: "@kevin", text: "hello" });
+    check("liste vide : tous les comptes", x.matchAccount(binancePost, []), true);
+    check("nom affiché « Binance » = @binance", x.matchAccount(binancePost, ["binance"]), true);
+    check("sous-texte (ton compte) jamais pris pour l'auteur", x.matchAccount(binancePost, ["kevin"]), false);
+    check(
+      "@pseudo dans le titre",
+      x.matchAccount(post({ title: "Binance France (@binance_fr)", text: "x" }), ["binance_fr"]),
+      true,
+    );
+    check("autre compte refusé", x.matchAccount(post({ title: "Crypto Free", text: "x" }), ["binance"]), false);
+    check("libellé du compte", x.accountLabel(post({ title: "Binance France (@Binance_FR)", text: "x" })), "@binance_fr");
+
+    const now = T0 + 100_000;
+    check("post récent", x.isFresh({ postedAt: now - 5000, when: 0 }, now, 180_000, now - 60_000), true);
+    check("post trop ancien", x.isFresh({ postedAt: now - 200_000, when: 0 }, now, 180_000, 0), false);
+    check("post antérieur au démarrage", x.isFresh({ postedAt: now - 5000, when: 0 }, now, 180_000, now - 1000), false);
+    check(
+      "heure du post (when) plus ancienne retenue",
+      x.isFresh({ postedAt: now - 1000, when: now - 300_000 }, now, 180_000, 0),
+      false,
+    );
+
+    const relayed = x.formatXCode({ code: "AB12CD34", source: "label", from: "@binance", at: T0, inst: "3f9a1c2e", dry: true });
+    check("aller-retour #xcode", x.parseXCode(relayed), {
+      code: "AB12CD34", source: "label", from: "@binance", at: T0, inst: "3f9a1c2e", dry: true,
+    });
+    check(
+      "#xcode sans compte connu",
+      x.parseXCode(x.formatXCode({ code: "AB12CD34", source: "texte", from: null, at: T0, inst: "3f9a1c2e" })),
+      { code: "AB12CD34", source: "texte", from: null, at: T0, inst: "3f9a1c2e", dry: false },
+    );
+    for (const [name, text] of [
+      ["minuscules", "#xcode ab12cd34 src=label from=@b at=1800000000000 inst=3f9a1c2e"],
+      ["7 caractères", "#xcode AB12CD3 src=label from=@b at=1800000000000 inst=3f9a1c2e"],
+      ["code BP", "#xcode BPVV80RZ src=label from=@b at=1800000000000 inst=3f9a1c2e"],
+      ["8 chiffres", "#xcode 12345678 src=label from=@b at=1800000000000 inst=3f9a1c2e"],
+      ["source inconnue", "#xcode AB12CD34 src=image from=@b at=1800000000000 inst=3f9a1c2e"],
+      ["sans inst", "#xcode AB12CD34 src=label from=@b at=1800000000000"],
+      ["pas en tête", "note #xcode AB12CD34 src=label from=@b at=1800000000000 inst=3f9a1c2e"],
+      ["texte en trop", "#xcode AB12CD34 src=label from=@b at=1800000000000 inst=3f9a1c2e !"],
+      ["mot en texte libre", "#xcode ABCDEFGH src=texte from=@b at=1800000000000 inst=3f9a1c2e"],
+    ]) {
+      check(`#xcode refusé : ${name}`, x.parseXCode(text), null);
+    }
+    check("relais frais (10 s)", x.isFreshRelay(T0, T0 + 10_000), true);
+    check("relais périmé (31 s)", x.isFreshRelay(T0, T0 + 31_000), false);
+    check("relais daté du futur", x.isFreshRelay(T0 + 20_000, T0), false);
+
+    check("solo : réclamé ici", x.routeFor({ role: "solo", canClaimNow: false }), "local");
+    check("téléphone responsable : réclamé ici", x.routeFor({ role: "backup", canClaimNow: true }), "local");
+    check("téléphone en veille : transmis au PC", x.routeFor({ role: "backup", canClaimNow: false }), "forward");
+  }
+
+  // ─── Journal d'activité de l'app : montants gagnés ────────────────────────
+  section("Journal d'activité : montants gagnés");
+  {
+    const activity = require("../src/activity");
+    check("« 0.0009 SPELL »", activity.parseGain("0.0009 SPELL"), { amount: 0.0009, coin: "SPELL" });
+    check("« 0,5 USDT »", activity.parseGain("0,5 USDT"), { amount: 0.5, coin: "USDT" });
+    check("montant illisible", activity.parseGain("montant à vérifier sur Binance"), null);
   }
 
   console.log(

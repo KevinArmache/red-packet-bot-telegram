@@ -989,6 +989,23 @@ function giftAmount(data) {
 }
 
 /**
+ * Valeur en dollars affichée par la fenêtre de RÉSULTAT (« … ≈ $0.30 »), ou
+ * null. Pour le total des gains de l'app : jamais bloquant, jamais une preuve.
+ */
+async function readUsdFromPage() {
+  try {
+    const texts = await cryptoboxPage.$$eval('[role="dialog"]', (nodes) =>
+      nodes.filter((d) => d.getClientRects().length > 0).map((d) => d.innerText || ''));
+    for (const text of texts) {
+      if (!/vous a envoyé|sent you/i.test(text)) continue;
+      const m = /≈\s*\$\s*([0-9]+(?:[.,][0-9]+)?)/.exec(text);
+      if (m) return Number(m[1].replace(',', '.'));
+    }
+  } catch (_) { }
+  return null;
+}
+
+/**
  * Montant affiché par la fenêtre de RÉSULTAT (« X vous a envoyé un Red Packet
  * … 0.0009 SPELL ≈ $… »), ou ''. Secours si la réponse de l'API manque.
  * Jamais l'enveloppe encore fermée (bouton « Ouvrir ») : sa note est écrite
@@ -1275,8 +1292,9 @@ async function claimCode(code, opts = {}) {
           const gain = giftAmount(grab.body.data) || await readGainFromPage();
           const sender = queryData?.payerNickname ? ` (Red Packet de ${queryData.payerNickname})` : '';
           logger.success(`💰 GAGNÉ ! Code ${code} → ${gain || 'montant à vérifier sur Binance'}${sender}`);
+          const gainUsd = await readUsdFromPage();
           await closeRedPacketWindow();
-          return { remember: true, status: 'success', gain };
+          return { remember: true, status: 'success', gain, gainUsd };
         }
         // Réponse sans preuve d'encaissement : traitée comme une absence de réponse
       }
@@ -1286,8 +1304,9 @@ async function claimCode(code, opts = {}) {
       const pageGain = await readGainFromPage();
       if (pageGain) {
         logger.success(`💰 GAGNÉ ! Code ${code} → ${pageGain}`);
+        const gainUsd = await readUsdFromPage();
         await closeRedPacketWindow();
-        return { remember: true, status: 'success', gain: pageGain };
+        return { remember: true, status: 'success', gain: pageGain, gainUsd };
       }
       const errorText = await readErrorFromPage();
       if (errorText) return claimFailure(code, { text: errorText });

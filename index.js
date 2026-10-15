@@ -27,6 +27,8 @@ const queue = require("./src/queue");
 const notifier = require("./src/notifier");
 const relay = require("./src/relay");
 const antiban = require("./src/antiban");
+const activity = require("./src/activity");
+const xsource = require("./src/xsource");
 const { hints, ANDROID_APP } = require("./src/platform");
 const binance = require("./src/binance");
 const { startTelegramClient, loginTelegram, isAuthDeadError } = require("./src/telegram");
@@ -88,7 +90,7 @@ function parseTargetChannels() {
 // ─── Bilan périodique ────────────────────────────────────────────────────────
 
 function printStats(title = "📊 Bilan d'activité") {
-  const { rows } = stats.snapshot([...antiban.statsRows(), ...relay.statsRows()]);
+  const { rows } = stats.snapshot([...xsource.statsRows(), ...antiban.statsRows(), ...relay.statsRows()]);
   logger.blank();
   logger.table(title, rows, logger.colors.cyan);
   logger.blank();
@@ -138,6 +140,7 @@ function writeHeartbeat() {
   if (!HEARTBEAT_FILE) return;
   const s = binance.getStatus();
   const guard = antiban.heartbeatFields();
+  const peer = relay.peerInfo();
   const browser = s.awaitingLogin
     ? "login"
     : s.ready
@@ -162,6 +165,20 @@ function writeHeartbeat() {
     `messages=${stats.state.messagesSeen}`,
     `tg_ok=${telegramAlive() ? 1 : 0}`,
     `tg_healthy_at=${telegramHealthyAt}`,
+    // Écran d'accueil de l'app (version 2) : compteurs, anti-blocage, relais, X
+    `failed=${stats.state.codesFailed}`,
+    `guarded=${stats.state.codesGuarded}`,
+    `deferred=${stats.state.codesDeferred}`,
+    `skipped=${stats.state.codesSkipped}`,
+    `claimed=${stats.state.codesClaimed}`,
+    `avg_wait_ms=${stats.state.codesClaimed ? Math.round(stats.state.totalDetectToClaimMs / stats.state.codesClaimed) : 0}`,
+    `sel_at=${antiban.SELECTIVE_AT}`,
+    // Mode léger : jamais d'arrêt ⛔ (0 = pas de seuil d'arrêt)
+    `stop_at=${antiban.MODE === "stop" ? antiban.STOP_AT : 0}`,
+    `ab_mode=${antiban.MODE}`,
+    `peer_state=${peer.state}`,
+    `peer_at=${peer.at}`,
+    ...xsource.heartbeatLines(),
   ];
   try {
     fs.writeFileSync(HEARTBEAT_FILE, `${lines.join("\n")}\n`);
@@ -506,11 +523,22 @@ async function fatal(reason, exitCode = 1) {
  * Code que CET appareil ne réclame pas (l'autre appareil en est responsable) :
  * inscrit à l'historique pour ne jamais le tenter plus tard (repost, édition).
  */
-function leaveToOtherDevice(code, postedAt) {
+function leaveToOtherDevice(code, postedAt, meta = {}) {
   stats.bump("codesDeferred");
-  history.addCode(code);
+  // Essai à blanc (X_DRY_RUN) : rien n'est mémorisé, le code de test resservira
+  if (!meta.dryRun) history.addCode(code);
+  activity.record(code, meta, "deferred");
   logger.info(`🤝 Code ${code} non réclamé ici — ${relay.whyNotClaiming(postedAt)}`);
 }
+
+/** Issue d'une réclamation → statut du journal d'activité de l'app. */
+const ACTIVITY_STATUS = {
+  success: "won",
+  permanent_failure: "failed",
+  rate_limited: "paused",
+  temporary_failure: "error",
+  unknown: "unknown",
+};
 
 /**
  * Chaque code détecté par Telegram est mis en file puis réclamé sur Binance.
@@ -518,8 +546,10 @@ function leaveToOtherDevice(code, postedAt) {
  *    le résultat (protection du compteur anti-fraude Binance).
  *
  * @param {string} code - Code Cryptobox détecté.
- * @param {{ channel?: string, detectedAt?: number, postedAt?: number }} [meta]
+ * @param {{ channel?: string, detectedAt?: number, postedAt?: number,
+ *   origin?: 'telegram'|'x', source?: string, dryRun?: boolean }} [meta]
  *   postedAt : heure SERVEUR Telegram de la publication (ou de l'édition).
+ *   dryRun : essai à blanc (codes X de test) — tout sauf la saisie du code.
  */
 function handleDetectedCode(code, meta = {}) {
   // Arrêt en cours : l'autre appareil a déjà été prévenu, il s'en charge
@@ -529,9 +559,12 @@ function handleDetectedCode(code, meta = {}) {
     return;
   }
 
+  meta = { origin: "telegram", ...meta };
+  activity.detected(meta);
+
   // Relais : un seul appareil est responsable de chaque code
   if (!relay.canClaim(meta.postedAt)) {
-    leaveToOtherDevice(code, meta.postedAt);
+    leaveToOtherDevice(code, meta.postedAt, meta);
     history.clearProcessing(code);
     return;
   }
@@ -547,7 +580,7 @@ function handleDetectedCode(code, meta = {}) {
   queue.enqueue(async () => {
     // La responsabilité a changé pendant l'attente dans la file
     if (!relay.canClaim(meta.postedAt)) {
-      leaveToOtherDevice(code, meta.postedAt);
+      leaveToOtherDevice(code, meta.postedAt, meta);
       history.clearProcessing(code);
       return;
     }
@@ -566,7 +599,19 @@ function handleDetectedCode(code, meta = {}) {
     if (!verdict.ok) {
       stats.bump("codesGuarded");
       logger.warn(`🛡️ Code ${code} sauté — ${verdict.why}`);
+      activity.record(code, meta, "guarded");
       history.clearProcessing(code);
+      return;
+    }
+
+    // Essai à blanc : toute la chaîne a tourné, sauf la saisie sur Binance
+    if (meta.dryRun) {
+      logger.success(
+        `🧪 Essai à blanc : ${code} aurait été réclamé ici (${meta.channel ?? "?"}) — rien n'est tapé sur Binance`,
+      );
+      activity.record(code, meta, "dry", { latencyMs: waitedMs });
+      history.clearProcessing(code);
+      writeHeartbeat();
       return;
     }
 
@@ -638,7 +683,7 @@ function handleDetectedCode(code, meta = {}) {
           break;
 
         case "deferred":
-          leaveToOtherDevice(code, meta.postedAt);
+          leaveToOtherDevice(code, meta.postedAt, meta);
           break;
 
         case "logged_out":
@@ -664,11 +709,20 @@ function handleDetectedCode(code, meta = {}) {
           break;
       }
 
+      if (result.status !== "deferred") {
+        activity.record(code, meta, ACTIVITY_STATUS[result.status] ?? "skipped", {
+          gain: result.gain,
+          gainUsd: result.gainUsd,
+          latencyMs: waitedMs + elapsed,
+        });
+      }
+
       if (result.remember) {
         history.addCode(code);
       }
     } finally {
       history.clearProcessing(code);
+      writeHeartbeat(); // l'app voit le résultat tout de suite
     }
   }, code);
 }
@@ -719,6 +773,7 @@ function setupGlobalErrorHandlers() {
     }
 
     printStats("📊 Bilan final");
+    activity.flush();
     await binance.closeBrowser();
     logger.banner(["👋 Bot arrêté proprement — à bientôt !"], logger.colors.yellow);
     process.exit(0);
@@ -820,6 +875,7 @@ async function main() {
   // 2. Historique et anti-blocage (compteur, arrêt ⛔ et blocage Binance en
   //    cours survivent aux redémarrages)
   history.loadHistory();
+  activity.load();
   antiban.setHooks({ onChange: onAntibanChange });
   const saved = antiban.init();
   if (saved.pauseUntil > Date.now()) {
@@ -847,6 +903,7 @@ async function main() {
     await binance.initBrowser(browserHooks);
   }
   logger.info(`🎯 ${targetChannels.length} canal(aux) demandé(s) dans TARGET_CHANNELS`);
+  logger.info(`🐦 X : ${xsource.describe()}`);
 
   // 5. Client Telegram — le relais démarre dès l'authentification, avant la
   //    résolution des canaux ; chaque code détecté est envoyé à Playwright
@@ -858,8 +915,11 @@ async function main() {
         onResumeCommand();
         return;
       }
+      // Code X relayé par le téléphone (#xcode)
+      if (xsource.handleSelfMessage(msg, isEdit)) return;
       relay.handleSelfMessage(msg);
     },
+    onChannelMessage: (channel) => activity.channelSeen(channel),
     onConnectionState: (state) => relay.setConnectionState(state),
     onAuthenticated: async (client, me) => {
       telegram = client;
@@ -887,6 +947,13 @@ async function main() {
         },
         getAntiban: () => antiban.exportState(),
         onPeerAntiban: (state) => antiban.mergePeer(state),
+        acceptsX: () => xsource.ACCEPT_RELAYED,
+      });
+      // Codes X : notifications lues par l'app (téléphone), #xcode (PC)
+      xsource.start({
+        client,
+        onCode: handleDetectedCode,
+        onPost: (channel) => activity.channelSeen(channel, "x"),
       });
       logger.blank();
       logger.rule("📡 Canaux");

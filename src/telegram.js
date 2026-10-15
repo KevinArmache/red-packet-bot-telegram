@@ -537,13 +537,15 @@ async function loginTelegram() {
  *   Messages de tes « Messages enregistrés » (état du relais PC ⇄ téléphone).
  * @param {(state: string) => void} [options.onConnectionState]
  *   offline / connecting / updating / connected.
+ * @param {(channel: string) => void} [options.onChannelMessage]
+ *   Nouveau message d'un canal surveillé (statistiques par canal de l'app).
  * @param {(tg: TelegramClient, me: import('@mtcute/node').User) => Promise<void>} [options.onAuthenticated]
  *   Appelé juste après la connexion, AVANT la résolution des canaux (qui peut
  *   durer) : le relais démarre ainsi au plus tôt.
  * @returns {Promise<{ tg: TelegramClient, me: import('@mtcute/node').User }>}
  */
 async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
-  const { onSelfMessage, onConnectionState, onAuthenticated } = options;
+  const { onSelfMessage, onConnectionState, onAuthenticated, onChannelMessage } = options;
   const tg = createClient({ ownSignals: true });
 
   const dp = new Dispatcher(tg);
@@ -654,6 +656,14 @@ async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
       stats.bump("messagesSeen");
       if (isEdit) stats.bump("messagesEdited");
 
+      // ── Nom du canal (logs, statistiques par canal de l'app) ───────────
+      const channelName =
+        channelMap.get(chatKey) ||
+        (chat.username ? `@${chat.username}` : null) ||
+        chat.title ||
+        `ID:${chatKey}`;
+      if (onChannelMessage && !isEdit) onChannelMessage(channelName);
+
       if (IS_DEBUG) {
         logger.debug(
           `MSG ${isEdit ? "édité" : "reçu"} — chatId="${chatKey}" titre="${chat.title}"`,
@@ -712,13 +722,6 @@ async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
       const sources = buildMessageSources(msg);
       const codes = extractCodes(sources);
       if (codes.length === 0) return;
-
-      // ── Nom du canal pour le log ───────────────────────────────────────
-      const channelName =
-        channelMap.get(chatKey) ||
-        (chat.username ? `@${chat.username}` : null) ||
-        chat.title ||
-        `ID:${chatKey}`;
 
       // ── Envoi immédiat des codes trouvés ───────────────────────────────
       // Aucun délai artificiel : la lecture est passive côté Telegram (aucun
@@ -975,6 +978,7 @@ module.exports = {
   loginTelegram,
   isAuthDeadError,
   extractCodes,
+  isPlausibleCode,
   buildMessageSources,
   // Exposés pour les tests
   authenticate,

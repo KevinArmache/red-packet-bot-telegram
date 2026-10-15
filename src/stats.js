@@ -32,6 +32,12 @@ const state = {
   codesDeferred: 0, // Laissés à l'autre appareil (relais PC ⇄ téléphone)
   codesGuarded: 0, // Sautés par l'anti-blocage (codes en texte libre, arrêt ⛔)
 
+  // X (Twitter) — src/xsource.js
+  xPosts: 0, // Notifications de l'appli X lues (téléphone)
+  xCodes: 0, // Codes trouvés dans ces posts
+  xForwarded: 0, // Codes transmis au PC (#xcode)
+  xRelayed: 0, // Codes reçus du téléphone (PC)
+
   // Latences (ms)
   totalDetectToClaimMs: 0,
   worstDetectToClaimMs: 0,
