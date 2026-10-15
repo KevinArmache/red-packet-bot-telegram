@@ -56,6 +56,32 @@ class Heartbeat(private val values: Map<String, String>, val writtenAt: Long) {
     val startedAt get() = values["started_at"]?.toLongOrNull() ?: 0L
     /** Telegram répond (vérification toutes les 3 min dans le bot). */
     val telegramOk get() = values["tg_ok"] != "0"
+    val lastCodeAt get() = long("last_code_at")
+
+    // Écran d'accueil (bot de la version 2) : 0 / vide avec un bot plus ancien
+    val failed get() = int("failed")
+    val guarded get() = int("guarded")
+    val deferred get() = int("deferred")
+    val skipped get() = int("skipped")
+    val claimed get() = int("claimed")
+    /** Délai moyen entre la détection d'un code et sa saisie (ms). */
+    val avgWaitMs get() = long("avg_wait_ms")
+    /** Seuil « codes clairs seulement » (0 = jamais). */
+    val selectiveAt get() = values["sel_at"]?.toIntOrNull() ?: 8
+    /** Seuil d'arrêt ⛔ (0 = mode léger, pas d'arrêt). */
+    val stopAt get() = values["stop_at"]?.toIntOrNull() ?: 9
+    /** L'autre appareil vu par le relais : active, standby, pause, stopped, unavailable… */
+    val peerState get() = values["peer_state"] ?: ""
+    val peerAt get() = long("peer_at")
+    val xOn get() = values["x_on"] == "1"
+    val xDryRun get() = values["x_dry"] == "1"
+    val xSeen get() = int("x_seen")
+    val xCodes get() = int("x_codes")
+    val xLastAt get() = long("x_last_at")
+    val xLastFrom get() = values["x_last_from"] ?: ""
+
+    private fun int(key: String) = values[key]?.toIntOrNull() ?: 0
+    private fun long(key: String) = values[key]?.toLongOrNull() ?: 0L
 
     companion object {
         fun read(file: File): Heartbeat? = try {

@@ -5,6 +5,8 @@ Ce guide installe le bot sur ton téléphone Android sous forme d'**application 
 - **Le téléphone est le secours du PC.** Le PC réclame les codes en priorité ; le téléphone prend le relais dès que le PC s'arrête.
 - **La connexion Binance se fait directement dans l'app**, en plein écran, avec le clavier du téléphone.
 - **L'app tourne en permanence** : notification fixe, relance automatique après un plantage, après un redémarrage du téléphone et après une mise à jour.
+- **Elle lit aussi les codes publiés sur X (Twitter)**, par les notifications de l'appli X, sans scraping ni API (voir la [partie 7 bis](#7-bis-les-codes-publiés-sur-x-twitter)).
+- **Au premier lancement, l'assistant 🧭** te guide en 5 étapes : Telegram, Binance, X, réglages du téléphone, alerte de test.
 
 Compte environ **20 minutes** sur le téléphone la première fois, plus le temps de la première compilation sur le PC.
 
@@ -17,6 +19,7 @@ Compte environ **20 minutes** sur le téléphone la première fois, plus le temp
 5. [La connexion Telegram](#5-la-connexion-telegram)
 6. [La connexion Binance](#6-la-connexion-binance)
 7. [Les réglages du téléphone (écran Santé)](#7-les-réglages-du-téléphone-écran-santé)
+7 bis. [Les codes publiés sur X (Twitter)](#7-bis-les-codes-publiés-sur-x-twitter)
 8. [Au quotidien](#8-au-quotidien)
 9. [Le relais avec le PC](#9-le-relais-avec-le-pc)
 10. [Mettre à jour l'app](#10-mettre-à-jour-lapp)
@@ -115,17 +118,17 @@ Le plus simple est de reprendre le `.env` du PC.
 1. Sur le PC, copie ton fichier `.env` sur le Bureau et renomme la copie `bot.env`.
 2. Envoie `bot.env` dans tes **Messages enregistrés** Telegram.
 3. Sur le téléphone, touche le fichier dans Telegram, puis le menu **⋮** → **Partager** (ou **Ouvrir avec**) → **Red Packet Bot**.
-4. L'app s'ouvre sur **Réglages**, déjà remplis. Vérifie, puis touche **Enregistrer**.
+4. L'app s'ouvre sur **⚙️ Réglages**, déjà remplis. Vérifie, puis touche **💾 Enregistrer** dans la barre qui apparaît en bas de l'écran (elle ne s'affiche que s'il y a des changements).
 5. **Supprime** ensuite `bot.env` des Messages enregistrés et du Bureau : ce fichier contient tes secrets.
 
-Autres façons d'importer, dans **Réglages** → **Importer ton .env** :
+Autres façons d'importer, dans **⚙️ Réglages** → **📥 Importer ton .env** (ou à l'étape 1 de l'assistant 🧭) :
 
-- **Choisir le fichier** : si `bot.env` est déjà dans le dossier Download du téléphone ;
-- **Coller** : si tu as copié le contenu du `.env`.
+- **📂 Choisir le fichier** : si `bot.env` est déjà dans le dossier Download du téléphone ;
+- **📋 Coller** : si tu as copié le contenu du `.env`.
 
 Tu peux aussi tout remplir à la main.
 
-**Ce que l'app vérifie avant d'enregistrer :**
+**Ce que l'app vérifie avant d'enregistrer** (une erreur s'affiche en rouge, juste sous le champ concerné) :
 
 - `API_ID` est un nombre ;
 - `API_HASH` fait 32 caractères, et ce n'est pas la valeur d'exemple ;
@@ -144,8 +147,8 @@ Tu peux aussi tout remplir à la main.
 
 Le téléphone a **sa propre connexion** à ton compte Telegram : ne copie pas la session du PC (deux appareils sur la même session se déconnectent l'un l'autre).
 
-1. Écran **Accueil** → **2. Connexion Telegram** → **Ouvrir**.
-2. Touche **Se connecter**. Le bot démarre et demande le code à Telegram.
+1. Onglet **📡 Sources** → carte **✈️ Telegram** (ou l'étape 1 de l'assistant 🧭).
+2. Touche **🔐 Se connecter à Telegram**. Le bot démarre et demande le code à Telegram.
 3. Le code arrive dans ton **app Telegram** (conversation « Telegram »), ou par SMS. L'app Red Packet Bot affiche aussi une notification **📱 Connexion Telegram**.
 4. Tape le code dans le champ **Code reçu**, puis **Valider**.
 5. Si ton compte a un **mot de passe 2FA**, l'app le demande ensuite.
@@ -160,7 +163,7 @@ La connexion apparaît dans Telegram → **Réglages** → **Appareils**.
 
 ## 6. La connexion Binance
 
-1. Écran **Accueil** → **3. Connexion Binance** → **Ouvrir**.
+1. Onglet **📡 Sources** → carte **🔐 Binance** → **Se connecter à Binance** (ou l'étape 2 de l'assistant 🧭).
 2. La page Binance s'ouvre en plein écran, en version « ordinateur » : **pince pour zoomer**. Le clavier du téléphone s'ouvre normalement.
 3. Connecte-toi (e-mail ou téléphone, mot de passe, code 2FA, éventuel puzzle). Choisis la connexion par mot de passe : le QR code ne peut pas être scanné par le téléphone qui l'affiche.
 4. Dès que la page **Cryptobox** et son champ de code apparaissent, l'écran affiche **✅ Connecté à Binance** et se ferme tout seul.
@@ -187,7 +190,7 @@ Le bot utilise ensuite la même session, dans une page invisible.
 >
 > 👉 **Ne désactive jamais cette notification.** Tu peux la replier dans le volet, mais si tu la coupes, HiOS gèle de nouveau le bot.
 
-Ouvre l'onglet **Santé**. Chaque point a un bouton qui ouvre le bon écran des réglages :
+Ouvre l'écran **🩺 Santé** : touche la pastille **🩺 11/12** en haut à droite de l'Accueil, ou **⚙️ Réglages** → **🩺 Santé du téléphone**. Le score compte les points en ordre ; il passe au rouge s'il manque un réglage **🚨 indispensable**. Chaque point a un bouton qui ouvre le bon écran des réglages :
 
 - les points **✅** sont vérifiés automatiquement ;
 - pour les points **❔** (spécifiques à Tecno), fais le réglage puis **coche la case**.
@@ -222,20 +225,60 @@ Si **« Android a endormi le bot »** apparaît, un réglage manque (souvent Pho
 
 ---
 
+## 7 bis. Les codes publiés sur X (Twitter)
+
+Des Red Packets sont aussi publiés sur X. Il n'existe pas d'API gratuite pour les lire, et les robots qui lisent le site se font bloquer. L'app fait donc autrement : **le téléphone lit les notifications de l'appli X officielle**, pour les comptes que tu suis avec la cloche. Pour X, c'est toi qui reçois des notifications, comme d'habitude : pas de robot, rien à bloquer.
+
+Les codes X suivent **les mêmes règles que ceux de Telegram**, anti-blocage compris : codes `BP` ignorés, codes en texte libre sautés quand le compteur de codes faux monte. Quand le PC réclame, le téléphone lui transmet chaque code X (voir la [partie 9](#9-le-relais-avec-le-pc)).
+
+**1. Sur l'appli X**
+
+1. Installe **X** depuis le Play Store et connecte-toi.
+2. Pour chaque compte qui publie des codes, ouvre son profil → touche la **cloche 🔔** → **Tous les posts**. Sans ça, X n'envoie aucune notification et le bot ne voit rien.
+3. **Réglages** → **Applis** → **X** → **Batterie** → **Sans restriction**. Sinon, Android retarde les notifications de X écran éteint, et les codes arrivent trop tard.
+4. Sur Tecno : **Phone Master** → **Gestion du démarrage auto** → active aussi **X**.
+
+**2. Dans l'app Red Packet Bot**
+
+1. **⚙️ Réglages** → **🐦 Codes publiés sur X** → active **Lire les posts X**.
+2. **Comptes X** : écris les comptes à suivre, séparés par des virgules (par exemple `@binance, @binance_fr`). Vide, l'app lit **toutes** les notifications de X, y compris les suggestions de X : une liste est conseillée.
+3. Touche **Autoriser** à côté de **Accès aux notifications**. Android ouvre l'écran **Accès aux notifications** : active **Red Packet Bot — codes publiés sur X**.
+4. **💾 Enregistrer** : le bot redémarre avec la lecture de X.
+
+> [!TIP]
+> **L'interrupteur est grisé, ou Android parle de « paramètre restreint » ?** Android bloque ce réglage pour les applis installées hors du Play Store. Va dans **Réglages** → **Applis** → **Red Packet Bot** → menu **⋮** en haut à droite → **Autoriser les paramètres restreints**, puis réessaie.
+
+**3. Tester sans risque : l'essai à blanc**
+
+Active **🧪 Essai à blanc** (sous « Lire les posts X »). Toute la chaîne tourne (lecture du post, détection, relais vers le PC, anti-blocage), mais **aucun code n'est tapé sur Binance** : les logs affichent « 🧪 Essai à blanc : … aurait été réclamé ici ». Publie un faux code depuis un autre compte X que tu suis avec la cloche (par exemple `Code : AB12CD34`), puis regarde **📜 Activité**. **Coupe l'essai à blanc** une fois les tests faits.
+
+**4. Suivre ce qui se passe**
+
+Onglet **📡 Sources** → carte **🐦 X** : accès accordé ou non, appli X installée, dernier post vu, codes trouvés, et l'activité de chaque compte suivi.
+
+**Limites, en toute honnêteté :**
+
+- Un code publié **seulement dans une image** n'est pas lu (pas de texte dans la notification).
+- Si X coupe un long post dans sa notification (« … »), un code placé tout à la fin peut manquer.
+- Le téléphone doit être allumé, avec le bot en marche : un post arrivé bot arrêté est ignoré (il serait périmé au démarrage).
+- Confidentialité : l'app ignore toute notification qui ne vient pas de X. Pour X, elle garde seulement l'auteur et les 120 premiers caractères du dernier post (affichés dans 📡 Sources), dans son stockage privé.
+
+---
+
 ## 8. Au quotidien
 
-**Démarrer :** écran **Accueil** → **▶️ Démarrer**. La notification permanente indique l'état du bot :
+**Démarrer :** onglet **🏠 Accueil** → touche le **grand bouton rond**. Son anneau montre l'état d'un coup d'œil : il pulse en **vert** quand le téléphone réclame, en **bleu** en veille (le PC réclame), il tourne en **or** pendant un démarrage, il est **gris** à l'arrêt et **rouge** en cas de problème (Binance à reconnecter, pause, arrêt anti-blocage). La notification permanente indique aussi l'état du bot :
 
 - **😴 En veille — le PC réclame** : le PC est actif, le téléphone attend. La page Binance est fermée après 2 minutes pour économiser la mémoire.
 - **🟢 Actif — le téléphone réclame** : le PC est arrêté ou muet, le téléphone a pris le relais.
 - **🔎 Vérification du relais…** : au démarrage, le temps de lire l'état du PC.
 - **🔑 Binance à reconnecter** : touche la notification Binance.
 - **🛑 Pause anti-ban** : limite Binance atteinte, reprise à l'heure indiquée.
-- **🔑 Telegram à reconnecter** : écran Connexion Telegram.
+- **🔑 Telegram à reconnecter** : onglet **📡 Sources** → **✈️ Telegram**.
 
-La notification affiche aussi le nombre de codes détectés et gagnés, et un chronomètre : depuis combien de temps le bot tourne (ce chronomètre l'empêche aussi d'être gelé par HiOS).
+La notification affiche aussi les codes détectés et gagnés, le compteur anti-blocage (« 🛡️ anti-ban 2/10 ») et « 🐦 X actif » si la lecture de X est activée (déplie-la pour tout voir), plus un chronomètre : depuis combien de temps le bot tourne (ce chronomètre l'empêche aussi d'être gelé par HiOS).
 
-**Arrêter :** bouton **⏹️ Arrêter** dans l'app, ou **Arrêter** dans la notification.
+**Arrêter :** touche le **grand bouton rond** puis confirme, ou **Arrêter** dans la notification. **Redémarrer :** appui long sur le bouton rond.
 
 - C'est un **arrêt propre** : le téléphone publie « arrêté » pour le PC et termine les codes en cours.
 - **Seul ce bouton arrête le bot durablement.** Fermer l'app ou la retirer des récentes ne l'arrête pas.
@@ -249,10 +292,16 @@ La notification affiche aussi le nombre de codes détectés et gagnés, et un ch
 - **S'il est figé** (aucun signe de vie pendant 5 min) : il est relancé.
 - **Filet de sécurité** : un contrôle toutes les 15 min relance le bot s'il devait tourner mais ne répond plus.
 
-**Écrans utiles :**
+**Les 4 onglets :**
 
-- **Accueil** : état, dernier signe de vie, messages analysés, coupures Telegram, étapes de mise en route, et **Alerte de test** (vérifie que ton bot @BotFather t'écrit bien).
-- **Logs** : ce que fait le bot, en direct, en couleurs. **Copier** et **Partager** servent à demander de l'aide.
+- **🏠 Accueil** : le bouton d'état, le **relais 💻 PC ⇄ 📱 téléphone** (l'appareil qui réclame est entouré d'or), les chiffres (💰 gains du jour par crypto et en dollars quand Binance les affiche, 🏆 gagnés, 🎁 détectés, 🎯 réussite, ⚡ délai avant saisie, ❌ refusés), le graphique des codes sur 24 h, la **jauge anti-blocage** (10 cases : or, puis orange au seuil « codes clairs », rouge à l'arrêt, 🔒 le blocage Binance jamais atteint) et les 5 derniers codes. Quand un code est gagné app ouverte, une enveloppe 🧧 s'ouvre à l'écran.
+- **📜 Activité** : **🎁 Codes**, les 50 derniers codes avec leur origine (✈️ TG ou 🐦 X) et leur résultat ; **🖥️ Logs**, ce que fait le bot en direct, avec des filtres (Tout, Codes, Erreurs). **Copier** et **Partager** servent à demander de l'aide.
+- **📡 Sources** : connexions Telegram et Binance, chaque canal avec ses codes et son dernier message (les canaux muets depuis 7 jours sont signalés), et la carte 🐦 X.
+- **⚙️ Réglages** : tous les réglages, la Santé, l'assistant 🧭 et « À propos ».
+
+L'**alerte de test** (vérifie que ton bot @BotFather t'écrit bien) est à la dernière étape de l'assistant 🧭 (**⚙️ Réglages** → **Relancer l'assistant de démarrage**).
+
+L'app suit le thème du téléphone : **sombre « rouge & or »** si le mode sombre est activé, clair sinon.
 
 ---
 
@@ -271,6 +320,8 @@ Le PC et le téléphone utilisent **le même compte Binance** : un seul réclame
 - **Ne supprime pas** le message `#botrelay` de tes Messages enregistrés : c'est par lui que les deux appareils se parlent.
 - **Mets le PC à jour en même temps** que l'app (`git pull` sur le PC) : les deux utilisent le même code.
 
+**Les codes X et le PC :** seul le téléphone voit les posts X. Quand c'est le PC qui réclame, le téléphone lui envoie chaque code X par un message silencieux `#xcode …` dans tes **Messages enregistrés**. Ne le supprime pas, il s'efface tout seul après 10 minutes. Les deux appareils jugent ce message avec la même règle que les codes des canaux, donc un code n'est jamais tapé deux fois. Un PC pas à jour ne prend pas ces codes : le téléphone t'envoie alors l'alerte « ⚠️ Le PC ne prend pas les codes X ».
+
 ---
 
 ## 10. Mettre à jour l'app
@@ -278,7 +329,7 @@ Le PC et le téléphone utilisent **le même compte Binance** : un seul réclame
 1. Sur le PC : `git pull`, puis `npm run apk`.
 2. Installe le nouveau `dist\RedPacketBot.apk` **par-dessus** l'ancien (même méthode qu'à l'étape 3). **Ne désinstalle pas** l'ancienne version : tes réglages et tes connexions Telegram et Binance sont gardés.
 3. Le bot redémarre tout seul après la mise à jour, s'il tournait.
-4. Vérifie la version installée : elle s'affiche en haut à droite de l'écran **Accueil** (par exemple « v1.0.0 (404525) »), et en bas du même écran avec la date d'installation. Le grand nombre augmente à chaque `npm run apk` : c'est le même que dans le nom du fichier `dist\RedPacketBot-1.0.0-404525.apk`. Le bot l'écrit aussi au début de ses logs (« 📱 App Android : version … »).
+4. Vérifie la version installée : elle s'affiche tout en bas de l'**🏠 Accueil** (par exemple « version 1.0.0 (404525) ») avec la date d'installation, et dans **⚙️ Réglages** → **ℹ️ À propos**. Le grand nombre augmente à chaque `npm run apk` : c'est le même que dans le nom du fichier `dist\RedPacketBot-1.0.0-404525.apk`. Le bot l'écrit aussi au début de ses logs (« 📱 App Android : version … »).
 
 Pense à mettre à jour le PC aussi (`npm install` si besoin, puis `npm start`).
 
@@ -290,27 +341,31 @@ Pense à mettre à jour le PC aussi (`npm install` si besoin, puis `npm start`).
 |---|---|
 | « Application non installée » à la mise à jour | L'APK n'est pas signée avec la même clé (dossier `.red-packet-bot` perdu ou autre PC). Désinstalle l'app, installe la nouvelle, refais les connexions Telegram et Binance. |
 | `npm run apk` : « SDK Android introuvable » ou erreur NDK / CMake | Ouvre Android Studio une fois. Dans le SDK Manager, installe NDK **27.1.12297006** et CMake **3.22.1** (voir l'[étape 1](#1-ce-quil-te-faut)). |
-| Le bouton **Démarrer** est grisé | Les réglages sont incomplets : onglet **Réglages**, corrige ce qui est indiqué, puis **Enregistrer**. |
+| Le bouton rond ouvre l'assistant au lieu de démarrer | Les réglages sont incomplets : **⚙️ Réglages**, corrige ce qui est en rouge sous les champs, puis **💾 Enregistrer**. |
 | Le code Telegram n'arrive pas | Vérifie le numéro dans les Réglages. Regarde la conversation « Telegram » dans ton app Telegram, puis tes SMS. Recommence avec **Se reconnecter**. |
-| **🔑 Telegram à reconnecter** | La session du téléphone a été fermée (par exemple dans Telegram → Appareils). Écran **Connexion Telegram** → **Se reconnecter**. |
+| **🔑 Telegram à reconnecter** | La session du téléphone a été fermée (par exemple dans Telegram → Appareils). Onglet **📡 Sources** → **✈️ Telegram** → **🔄 Se reconnecter**. |
 | **🔑 Binance à reconnecter** souvent | Binance fait expirer ses sessions de temps en temps : reconnecte-toi depuis la notification. Si ça arrive tous les jours, déconnecte-toi de Binance sur les autres appareils inutilisés. |
 | « 💤 Android a endormi le bot » | Un réglage de l'[étape 7](#7-les-réglages-du-téléphone-écran-santé) manque. Vérifie d'abord que la notification **« Bot en marche »** est bien affichée, avec son chronomètre : sans elle, HiOS gèle le bot. Ensuite : batterie sans restriction, démarrage auto et applis protégées dans Phone Master, nettoyage écran verrouillé désactivé. |
 | Beaucoup de **coupures Telegram** | Wi-Fi instable, ou économiseur de données. Garde le Wi-Fi allumé pendant la veille (réglages Wi-Fi avancés) et vérifie l'écran Santé. |
 | **Coupures Telegram de 30 à 50 min la nuit** | C'est HiOS qui éteint le Wi-Fi (fonction « AI Net ») : voir le point 8 de l'[étape 7](#7-les-réglages-du-téléphone-écran-santé). |
 | « ❔ Code … : résultat inconnu » | Binance n'a rien confirmé après « Ouvrir » (réseau coupé, page bloquée). Le code n'est jamais retenté. Regarde l'historique Cryptobox ; si ça se répète, envoie les logs. |
 | « 💰 GAGNÉ » : où voir le montant ? | Dans les logs (« 💰 GAGNÉ ! Code … → 0.0009 SPELL ») et dans l'alerte Telegram, comme sur le PC. Le montant vient directement de la réponse de Binance. |
-| Pas d'alertes Telegram | Envoie **/start** à ton bot d'alertes, vérifie le jeton dans les Réglages, puis **Alerte de test** sur l'Accueil. Les logs expliquent la cause (« Alerte non envoyée : … »). |
-| Notification **▶️ Relancer le bot** | Android a refusé de relancer le bot tout seul (souvent la batterie restreinte). Touche-la, puis **Démarrer**. Vérifie l'écran Santé. |
+| Pas d'alertes Telegram | Envoie **/start** à ton bot d'alertes, vérifie le jeton dans les Réglages, puis l'**alerte de test** (dernière étape de l'assistant 🧭). Les logs expliquent la cause (« Alerte non envoyée : … »). |
+| Notification **▶️ Relancer le bot** | Android a refusé de relancer le bot tout seul (souvent la batterie restreinte). Touche-la, puis le bouton rond de l'Accueil. Vérifie l'écran Santé. |
 | Le bot ne repart pas après un redémarrage du téléphone | Déverrouille le téléphone une fois : Android ne lance aucune app avant. Vérifie le démarrage auto dans Phone Master. |
 | **Compatibilité Node.js ⚠️** (pages de 16 Ko) | Ce téléphone utilise une mémoire en pages de 16 Ko, que Node.js mobile 18 ne gère pas encore. Garde le bot sur le PC (ou un autre téléphone). |
 | L'app se ferme quand le bot redémarre | C'est normal si tu es sur l'écran de connexion Binance pendant une relance : rouvre-le. |
-| Logs trop longs à lire | Onglet **Logs** → **Effacer** : l'écran repart de zéro, le bot continue de tourner. |
-| Autre problème | Onglet **Logs** → **Partager**, et envoie les dernières lignes. Pour une enquête plus poussée, le [guide de débogage](GUIDE-DEBOGAGE.md) explique comment laisser Claude examiner le téléphone par câble USB, et liste les problèmes déjà résolus. |
+| 🐦 Aucun post X dans **📡 Sources** | Vérifie, dans l'ordre : **Lire les posts X** activé, **Accès aux notifications** ✅, la cloche **Tous les posts** sur le compte dans l'appli X, et que les notifications de X s'affichent bien dans le volet. Puis **Batterie** de X sans restriction et démarrage auto de X dans Phone Master. |
+| 🐦 « Accès aux notifications » grisé | Android bloque ce réglage pour une app installée hors du Play Store : **Réglages** → **Applis** → **Red Packet Bot** → **⋮** → **Autoriser les paramètres restreints** (voir la [partie 7 bis](#7-bis-les-codes-publiés-sur-x-twitter)). |
+| 🐦 Post X vu, mais pas de code | Le code était peut-être dans une image, coupé par X (« … »), ou le compte n'est pas dans ta liste **Comptes X**. Avec **Logs détaillés (DEBUG)**, les logs montrent le texte reçu (« 🐦 Notification X de … »). |
+| ⚠️ « Le PC ne prend pas les codes X » | Le PC n'est pas à jour : `git pull` sur le PC, puis relance-le. |
+| Logs trop longs à lire | Onglet **📜 Activité** → **🖥️ Logs** → **🗑️** : l'écran repart de zéro, le bot continue de tourner. |
+| Autre problème | Onglet **📜 Activité** → **🖥️ Logs** → **📤 Partager**, et envoie les dernières lignes. Pour une enquête plus poussée, le [guide de débogage](GUIDE-DEBOGAGE.md) explique comment laisser Claude examiner le téléphone par câble USB, et liste les problèmes déjà résolus. |
 
 ---
 
 ## 12. Désinstaller
 
-1. Dans l'app, **⏹️ Arrêter** (le PC est prévenu tout de suite).
+1. Dans l'app, touche le bouton rond de l'**🏠 Accueil** puis **Arrêter** (le PC est prévenu tout de suite).
 2. Désinstalle **Red Packet Bot** comme n'importe quelle app : ses réglages et ses sessions sont effacés avec elle.
 3. Dans Telegram → **Réglages** → **Appareils**, termine la session du téléphone si elle apparaît encore.

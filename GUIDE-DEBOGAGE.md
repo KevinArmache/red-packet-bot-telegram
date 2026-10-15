@@ -16,6 +16,7 @@ Ce guide sert quand l'app **Red Packet Bot** se comporte mal sur le téléphone.
 8. [Résolu : le bot ne repartait pas après une mise à jour de l'app](#8-résolu--le-bot-ne-repartait-pas-après-une-mise-à-jour-de-lapp)
 9. [Résolu : pauses anti-ban de 2 h plusieurs fois par jour](#9-résolu--pauses-anti-ban-de-2-h-plusieurs-fois-par-jour)
 10. [Si le bot s'endort de nouveau](#10-si-le-bot-sendort-de-nouveau)
+11. [X (Twitter) : lecture des notifications de l'appli X](#11-x-twitter--lecture-des-notifications-de-lappli-x)
 
 ---
 
@@ -44,7 +45,7 @@ Ouvre Claude Code dans le dossier du bot, puis décris :
 
 - **le symptôme** : ce que tu faisais (écran verrouillé, app quittée, redémarrage…) et ce que tu as vu ;
 - **quand** : l'heure, même approximative, car le journal d'Android ne remonte que de quelques heures ;
-- **ce qu'affiche l'app** : écran Accueil (« Dernier signe de vie », « 💤 Android a endormi le bot … fois ») et onglet Logs ;
+- **ce qu'affiche l'app** : 🏠 Accueil (couleur du bouton rond, « 💤 Android a endormi le bot … fois »), 📡 Sources, et 📜 Activité → 🖥️ Logs ;
 - que le téléphone est **branché avec le débogage USB**.
 
 Exemple :
@@ -62,7 +63,7 @@ Exemple :
 **Une limite :** l'APK normale n'est pas « débogable », donc `adb` ne peut pas lire ses fichiers.
 
 - **L'état du bot**, lui, reste lisible même téléphone verrouillé : `adb shell dumpsys activity service com.redpacketbot.app/.BotService` donne la version, le statut, l'âge du dernier signe de vie et le nombre de mises en veille forcées (`sleeps`). Voir la [partie 3](#3-les-commandes-utiles).
-- **Les logs** : ajoute `logs` à la même commande pour leurs 40 dernières lignes. Sinon, utilise l'onglet **Logs** → **Partager**.
+- **Les logs** : ajoute `logs` à la même commande pour leurs 40 dernières lignes. Sinon, utilise **📜 Activité** → **🖥️ Logs** → **📤 Partager**.
 - **La variante de test** (`npm run apk -- --debug`, app séparée `com.redpacketbot.app.debug`) rend ses fichiers lisibles avec `adb shell run-as com.redpacketbot.app.debug …`.
 
 ---
@@ -82,15 +83,33 @@ adb shell dumpsys activity service com.redpacketbot.app/.BotService
 adb shell dumpsys activity service com.redpacketbot.app/.BotService logs
                                                  # → la même chose + les 40 dernières lignes des logs du bot
 adb shell "dumpsys package com.redpacketbot.app | grep -E 'versionName|versionCode|lastUpdateTime'"
-                                                 # → la version installée (aussi en haut de l'écran Accueil)
+                                                 # → la version installée (aussi en bas de l'Accueil)
 adb shell pm list packages -U redpacket          # → package:com.redpacketbot.app uid:<UID>
-adb shell pidof com.redpacketbot.app:bot         # → le PID du bot (rien = le bot ne tourne pas)
+adb shell pidof com.redpacketbot.app:bot         # → le PID du processus « :bot » (rien = le bot ne tourne pas)
+                                                 #   ⚠️ un PID ne prouve plus que le bot tourne : avec l'accès aux
+                                                 #   notifications (X), Android garde ce processus pour l'écouteur.
+                                                 #   La preuve : nodeRunning=true dans le dumpsys ci-dessus
 adb shell "dumpsys activity services com.redpacketbot.app | grep isForeground"
                                                  # → isForeground=true … types=0x40000000
 adb shell "dumpsys deviceidle whitelist | grep redpacket"
                                                  # → user,com.redpacketbot.app,<UID> (batterie sans restriction)
 adb shell am get-standby-bucket com.redpacketbot.app   # → 5 (exempté)
 adb shell dumpsys activity exit-info com.redpacketbot.app   # pourquoi le bot s'est arrêté (reason=…)
+```
+
+**X (Twitter)** (voir la [partie 11](#11-x-twitter--lecture-des-notifications-de-lappli-x))
+
+```bash
+adb shell dumpsys activity service com.redpacketbot.app/.BotService
+                                                 # → ligne « x: enabled=… access=… listener=… posts=… lastPost=… »
+adb shell "dumpsys notification | grep -i -A6 'notification listeners'"
+                                                 # → l'écouteur XNotificationListener est-il lié ?
+adb shell cmd notification allow_listener com.redpacketbot.app/com.redpacketbot.app.XNotificationListener
+                                                 # accorde l'accès aux notifications sans passer par l'écran
+adb shell "dumpsys notification --noredact | grep -A80 pkg=com.twitter.android"
+                                                 # le contenu exact des notifications de X (title, text, bigText…)
+adb shell cmd notification post -S bigtext -t "Binance" xtest "Red Packet 🎁 Code : AB12CD34"
+                                                 # notification de test : lue SEULEMENT en essai à blanc (X_DRY_RUN)
 ```
 
 **L'écran**
@@ -256,7 +275,7 @@ HiOS le gelait la plupart du temps, et **Termux:Boot** le relançait à chaque r
 - Fin de l'ancienne session Telegram du bot Termux, depuis Telegram → **Paramètres** → **Appareils**. Elle s'affichait « mtcute on **Node.js/v24.21.0** (Linux arm64) », app « mybot 0.29.7 ».
 
 > [!WARNING]
-> Dans cette liste, garde la session « mtcute on **Node.js/v18.20.4** (Linux arm64) » : c'est celle de l'app. Si elle est terminée par erreur, l'app affiche « 🔑 Telegram à reconnecter » : écran Connexion Telegram → **Se reconnecter**.
+> Dans cette liste, garde la session « mtcute on **Node.js/v18.20.4** (Linux arm64) » : c'est celle de l'app. Si elle est terminée par erreur, l'app affiche « 🔑 Telegram à reconnecter » : **📡 Sources** → **✈️ Telegram** → **🔄 Se reconnecter**.
 
 L'ancienne session Binance de Termux, elle, n'a plus de cookies nulle part et expirera seule : inutile d'y toucher.
 
@@ -456,3 +475,47 @@ Une mise à jour de HiOS peut changer les règles du gel. Dans l'ordre :
    - **VPN local** : épargné, mais il prend la place d'un éventuel VPN du téléphone.
    - **Son silencieux** : ne marcherait pas, car HiOS détecte le silence.
    - **Mode « ne jamais geler »** (`setAppMode`) : réservé aux applis système, refusé à ADB.
+
+---
+
+## 11. X (Twitter) : lecture des notifications de l'appli X
+
+Ajouté en octobre 2026. Il n'existe pas d'API X gratuite pour lire les posts, et lire le site avec un robot se fait bloquer. Le téléphone lit donc les **notifications de l'appli X officielle**, pour les comptes suivis avec la cloche « Tous les posts ».
+
+### Le chemin d'un code X
+
+1. **`XNotificationListener`** (Kotlin, processus `:bot`) reçoit chaque notification du téléphone. Il ignore tout ce qui ne vient pas de `com.twitter.android`, ainsi que les résumés de groupe et les notifications permanentes. Il garde le titre, `text`, `bigText`, les lignes, les messages et les liens cachés (`URLSpan`). Une notification déjà transmise avec le même texte est ignorée pendant 15 min.
+2. Il appelle `BotService.onXNotification()`, qui l'envoie à Node par le pont (message `x.post`). Si le bot ne tourne pas, la notification est comptée (`dropped`) et oubliée : elle serait périmée au démarrage.
+3. **`src/xsource.js`** (Node) vérifie la fraîcheur (`MAX_MESSAGE_AGE_S`, et rien d'antérieur au démarrage), la liste `X_ACCOUNTS`, nettoie le texte (@mentions, #hashtags, $cashtags, liens t.co, mot coupé par « … »), puis extrait les codes avec **les règles de Telegram** (`extractCodes`).
+4. Qui réclame :
+   - téléphone `solo`, ou responsable en ce moment : il réclame lui-même (`handleDetectedCode`) ;
+   - sinon : message silencieux `#xcode CODE src=… from=@compte at=… inst=…` dans les Messages enregistrés. Le PC le lit (`xsource.handleSelfMessage`) et les **deux** appareils jugent sur la date serveur Telegram de ce message (`relay.canClaim`), comme pour un code de canal. Un `#xcode` de plus de 30 s, édité ou mal formé est ignoré. Le téléphone le supprime après 10 min.
+5. L'anti-blocage s'applique comme pour Telegram : X n'a pas de monospace, donc ses codes sont `label`, `lien` ou `texte`, et les codes `texte` sont sautés au niveau « codes clairs ».
+
+Le PC annonce qu'il prend les codes X par le jeton ` x=1` de sa ligne `#botrelay` (`X_RELAY_ACCEPT=true`, par défaut). Sans ce jeton, le téléphone envoie l'alerte « ⚠️ Le PC ne prend pas les codes X ».
+
+### Tester sans risque
+
+1. **⚙️ Réglages** → **🐦 X** → **Essai à blanc** (`X_DRY_RUN=true`) : tout tourne, mais rien n'est tapé sur Binance (« 🧪 Essai à blanc » dans les logs, statut 🧪 dans **📜 Activité**). Le code n'est pas mémorisé : il peut resservir.
+2. Notification de test par câble (acceptée **seulement** en essai à blanc) :
+   `adb shell cmd notification post -S bigtext -t "Binance" xtest "Red Packet 🎁 Code : AB12CD34"`
+3. Sur le PC, un `#xcode` tapé à la main dans les Messages enregistrés doit donner 🎁 puis 🧪 :
+   `#xcode AB12CD34 src=label from=@test at=1800000000000 inst=00000000 dry=1` (remplace `at` par l'heure actuelle en millisecondes ; le bot juge sur la date du message).
+
+### Le format réel des notifications de X : à relever
+
+Le format des notifications de X peut changer à chaque mise à jour de l'appli. Au premier essai sur le Camon 40, relève-le avec `dumpsys notification --noredact` (partie 3) pour un post court, un post long, un lien Cryptobox, 3 posts rapides (regroupement), une réponse, et une suggestion de X. Note ici :
+
+- où se trouvent le texte du post (`android.text`, `android.bigText`, `android.textLines`) et le nom du compte (`android.title`, jamais `android.subText`, souvent ton propre compte) ;
+- si X coupe les posts longs (« … ») et si les liens sont des `t.co` ;
+- le délai entre la publication et la notification ;
+- le canal (`channel=`) des posts suivis par cloche, comparé à celui des suggestions.
+
+> [!WARNING]
+> **Android 15 et plus peut masquer les codes à usage unique** (codes de connexion) dans les notifications transmises aux applis comme Red Packet Bot. `dumpsys --noredact` montre le vrai texte, pas ce que l'app reçoit. Pour le vérifier : **Logs détaillés (DEBUG)** + essai à blanc, puis compare la ligne « 🐦 Notification X de … » des logs avec `dumpsys`. Si le texte y est remplacé, il n'existe pas de contournement propre : la permission qui lève ce masquage est réservée aux applis système.
+
+### Pièges pour qui modifie l'app
+
+- **Garder l'écouteur dans le processus `:bot`** (manifeste) : il joint ainsi `BotService.instance` directement, comme l'écran de connexion Binance. Une autre voie (Intent vers le service) relancerait le service au premier plan à chaque notification.
+- Android lie l'écouteur tout seul : il **recrée le processus `:bot`** même bot arrêté. C'est sans effet (Node ne démarre que par `launchNode`), mais `pidof com.redpacketbot.app:bot` ne prouve plus que le bot tourne.
+- Les textes de `Status.describe()` (titres de la notification) sont repris dans GUIDE-ANDROID.md : ne les change pas sans mettre le guide à jour.

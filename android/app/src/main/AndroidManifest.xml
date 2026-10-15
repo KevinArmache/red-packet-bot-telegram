@@ -15,9 +15,10 @@
         android:name="android.permission.SCHEDULE_EXACT_ALARM"
         android:maxSdkVersion="32" />
 
-    <!-- Écran « Santé » : ouvrir Phone Master (Tecno, Infinix, itel) -->
+    <!-- Écran « Santé » : ouvrir Phone Master (Tecno, Infinix, itel), vérifier l'appli X -->
     <queries>
         <package android:name="com.transsion.phonemaster" />
+        <package android:name="com.twitter.android" />
     </queries>
 
     <application
@@ -55,11 +56,26 @@
         </activity>
 
         <!-- Connexion Binance : même processus que la WebView du bot (mêmes cookies) -->
+        <!-- configChanges : rotation ou passage clair/sombre sans perdre la page de connexion -->
         <activity
             android:name=".BinanceLoginActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode|keyboardHidden"
             android:exported="false"
             android:process=":bot"
             android:windowSoftInputMode="adjustResize" />
+
+        <!-- 🐦 Codes publiés sur X : lit les notifications de l'appli X (et rien d'autre).
+             Même processus que le bot, pour lui transmettre chaque post directement. -->
+        <service
+            android:name=".XNotificationListener"
+            android:exported="true"
+            android:label="@string/x_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:process=":bot">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
         <!-- Le bot : Node.js + WebView Binance, dans son propre processus -->
         <service

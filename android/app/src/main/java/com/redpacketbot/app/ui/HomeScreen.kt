@@ -1,160 +1,311 @@
 package com.redpacketbot.app.ui
 
-import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redpacketbot.app.AppVersion
-import com.redpacketbot.app.BinanceLoginActivity
-import com.redpacketbot.app.BotService
 import com.redpacketbot.app.BotState
-import com.redpacketbot.app.Health
-import com.redpacketbot.app.MainActivity
+import com.redpacketbot.app.BotStatus
 import com.redpacketbot.app.Status
+import com.redpacketbot.app.Tone
+import com.redpacketbot.app.ui.components.AntibanGauge
+import com.redpacketbot.app.ui.components.Banner
+import com.redpacketbot.app.ui.components.ClaimRow
+import com.redpacketbot.app.ui.components.EmptyState
+import com.redpacketbot.app.ui.components.Hint
+import com.redpacketbot.app.ui.components.HourBars
+import com.redpacketbot.app.ui.components.Pill
+import com.redpacketbot.app.ui.components.RelayCard
+import com.redpacketbot.app.ui.components.ScreenHeader
+import com.redpacketbot.app.ui.components.ScreenList
+import com.redpacketbot.app.ui.components.SectionCard
+import com.redpacketbot.app.ui.components.StatCard
+import com.redpacketbot.app.ui.components.StatusOrb
+import com.redpacketbot.app.ui.components.antibanLevel
+import com.redpacketbot.app.ui.theme.AppColors
+import com.redpacketbot.app.ui.theme.Spacing
 
 @Composable
-fun HomeScreen(onNavigate: (String) -> Unit) {
+fun HomeScreen(vm: BotViewModel, onNavigate: (String) -> Unit) {
     val context = LocalContext.current
-    val snapshot by rememberSnapshot()
-    val heartbeat = snapshot.heartbeat
-    val (title, text) = Status.describe(snapshot.state, heartbeat?.takeIf { snapshot.isRunning })
+    val snapshot by vm.snapshot.collectAsStateWithLifecycle()
+    val health by vm.health.collectAsStateWithLifecycle()
+    val heartbeat = snapshot.liveHeartbeat
+    var confirmStop by rememberSaveable { mutableStateOf(false) }
+    val now = System.currentTimeMillis()
 
-    Column(
-        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
-    ) {
-        Section(title) {
-            if (text.isNotBlank()) Text(text)
-            if (!snapshot.isRunning || snapshot.status != BotState.RUNNING) {
-                Status.lastError(snapshot.state)?.let { Hint("❌ $it", Red) }
-            }
-            if (snapshot.isRunning && heartbeat != null) {
-                Hint("Dernier signe de vie : il y a ${Status.ago(heartbeat.ageMs)}")
-                Hint("Messages analysés : ${heartbeat.messages} · coupures Telegram : ${heartbeat.disconnects}")
-                if (heartbeat.sleeps > 0) {
-                    Hint("💤 Android a endormi le bot ${heartbeat.sleeps} fois : vérifie l'écran Santé.", Orange)
-                }
-            }
-            Hint(
-                if (snapshot.config.botRole == "solo") "Rôle : appareil seul (solo)"
-                else "Rôle : secours du PC (le PC réclame en priorité)",
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (snapshot.isRunning || snapshot.status == BotState.RESTARTING ||
-                    snapshot.status == BotState.TELEGRAM_REQUIRED
-                ) {
-                    Button(
-                        onClick = { BotService.send(context, BotService.ACTION_STOP) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Red),
-                    ) { Text("⏹️ Arrêter") }
-                    OutlinedButton(onClick = { BotService.send(context, BotService.ACTION_RESTART) }) {
-                        Text("🔄 Redémarrer")
+    // Processus du bot tué sans prévenir : l'état « en marche » est périmé
+    val status = if (snapshot.status == BotState.RUNNING && !snapshot.isRunning) {
+        BotStatus("stopped", Tone.IDLE, "⏹️", "Bot arrêté", "Plus de signe de vie : touche pour le démarrer.")
+    } else {
+        Status.model(snapshot.state, heartbeat)
+    }
+
+    ScreenList {
+        item {
+            ScreenHeader("🧧 Red Packet Bot") {
+                if (health.total > 0) {
+                    val color = when {
+                        health.criticalMissing > 0 -> AppColors.danger
+                        health.okCount < health.total -> AppColors.warning
+                        else -> AppColors.success
                     }
-                } else {
-                    Button(
-                        enabled = snapshot.config.isComplete,
-                        onClick = { BotService.send(context, BotService.ACTION_START) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Green),
-                    ) { Text("▶️ Démarrer") }
+                    Pill("🩺 ${health.okCount}/${health.total}", color, onClick = { onNavigate(Routes.HEALTH) })
                 }
             }
         }
 
-        Section("Mise en route") {
-            CheckRow(
-                snapshot.config.isComplete, "1. Réglages",
-                if (snapshot.config.isComplete) "${snapshot.config.channelList.size} canal(aux) surveillé(s)"
-                else "Importe ton .env ou remplis les champs.",
-            ) { OutlinedButton(onClick = { onNavigate(MainActivity.SCREEN_SETTINGS) }) { Text("Ouvrir") } }
-
-            val telegramOk = snapshot.hasTelegramSession && snapshot.status != BotState.TELEGRAM_REQUIRED
-            CheckRow(
-                telegramOk, "2. Connexion Telegram",
-                when {
-                    snapshot.status == BotState.TELEGRAM_REQUIRED -> "Session expirée : reconnecte-toi."
-                    telegramOk -> snapshot.state.optString("telegramName").ifEmpty { "Session enregistrée" }
-                    else -> "Le code arrive dans ton app Telegram."
-                },
-            ) { OutlinedButton(onClick = { onNavigate(MainActivity.SCREEN_TELEGRAM) }) { Text("Ouvrir") } }
-
-            val browser = heartbeat?.takeIf { snapshot.isRunning }?.browser
-            CheckRow(
-                when (browser) {
-                    "ready" -> true
-                    "login" -> false
-                    else -> null
-                },
-                "3. Connexion Binance",
-                when (browser) {
-                    "ready" -> "Session Binance active"
-                    "login" -> "Binance demande une reconnexion"
-                    "closed" -> "Page fermée pendant la veille (normal en secours du PC)"
-                    else -> "Connecte-toi une fois dans l'app."
-                },
-            ) {
-                OutlinedButton(onClick = {
-                    context.startActivity(Intent(context, BinanceLoginActivity::class.java))
-                }) { Text("Ouvrir") }
-            }
-
-            val failing = Health.check(context).count { it.ok == false }
-            CheckRow(
-                failing == 0, "4. Santé du téléphone",
-                if (failing == 0) "Réglages automatiques OK (vérifie aussi les points Tecno)"
-                else "$failing réglage(s) à corriger",
-            ) { OutlinedButton(onClick = { onNavigate(MainActivity.SCREEN_HEALTH) }) { Text("Ouvrir") } }
-
-            val testAlert = snapshot.state.optString("testAlert")
-            CheckRow(
-                when (testAlert) {
-                    "ok" -> true
-                    "failed", "disabled" -> false
-                    else -> null
-                },
-                "5. Alerte de test",
-                when (testAlert) {
-                    "ok" -> "Envoyée : vérifie ton Telegram"
-                    "failed" -> "Échec : jeton du bot d'alertes, ou /start pas envoyé au bot"
-                    "disabled" -> "Alertes désactivées (jeton vide ou niveau « off »)"
-                    else -> if (snapshot.isRunning) "Envoie une alerte pour vérifier" else "Démarre d'abord le bot"
-                },
-            ) {
-                OutlinedButton(
-                    enabled = snapshot.isRunning,
-                    onClick = { BotService.send(context, BotService.ACTION_TEST_ALERT) },
-                ) { Text("Envoyer") }
+        // ── Bouton d'état ──────────────────────────────────────────────────
+        item {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                StatusOrb(
+                    status = status,
+                    onTap = {
+                        when {
+                            snapshot.canStop -> confirmStop = true
+                            snapshot.config.isComplete -> vm.start()
+                            else -> onNavigate(Routes.WIZARD)
+                        }
+                    },
+                    onLongPress = if (snapshot.canStop) {
+                        {
+                            vm.restart()
+                            Toast.makeText(context, "🔄 Redémarrage du bot…", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        null
+                    },
+                )
+                Text(status.title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+                val since = heartbeat?.startedAt?.takeIf { it > 0 && status.phase in listOf("active", "standby", "checking") }
+                if (since != null) {
+                    Text(
+                        "en marche depuis ${Format.duration(now - since)}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AppColors.of(status.tone),
+                    )
+                }
+                if (status.detail.isNotBlank()) {
+                    Text(
+                        status.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = Spacing.l, vertical = 4.dp),
+                    )
+                }
+                Hint(
+                    when {
+                        snapshot.canStop -> "Touche pour arrêter · appui long pour redémarrer"
+                        snapshot.config.isComplete -> "Touche pour démarrer"
+                        else -> "Touche pour terminer la mise en route"
+                    },
+                )
             }
         }
 
-        Text(
-            "Le bot tourne en arrière-plan, même app fermée. Seul « Arrêter » l'arrête durablement.",
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Light,
-            modifier = Modifier.padding(8.dp),
+        // ── Problèmes ──────────────────────────────────────────────────────
+        if (!snapshot.isRunning || snapshot.status != BotState.RUNNING) {
+            Status.lastError(snapshot.state)?.let { error ->
+                item { Banner("❌", error, AppColors.danger) }
+            }
+        }
+        if (heartbeat != null && heartbeat.sleeps > 0) {
+            item {
+                Banner("💤", "Android a endormi le bot ${heartbeat.sleeps} fois depuis le démarrage.", AppColors.warning) {
+                    TextButton(onClick = { onNavigate(Routes.HEALTH) }) { Text("🩺 Santé") }
+                }
+            }
+        }
+
+        // ── Mise en route inachevée ────────────────────────────────────────
+        val remaining = listOf(
+            !snapshot.config.isComplete,
+            !snapshot.telegramOk,
+            health.criticalMissing > 0,
+        ).count { it }
+        if (remaining > 0) {
+            item {
+                Banner("🧭", "Mise en route : $remaining étape(s) à terminer.", AppColors.gold) {
+                    TextButton(onClick = { onNavigate(Routes.WIZARD) }) { Text("Continuer") }
+                }
+            }
+        }
+
+        // ── Relais PC ⇄ téléphone ──────────────────────────────────────────
+        if (snapshot.config.botRole != "solo") {
+            item { RelayCard(heartbeat, snapshot.isRunning) }
+        }
+
+        // ── Chiffres ───────────────────────────────────────────────────────
+        item { StatsGrid(snapshot) }
+
+        item {
+            val slots = snapshot.activity.last24h(now)
+            SectionCard(
+                title = "📈 Dernières 24 h",
+                subtitle = "${slots.sumOf { it.detected }} détecté(s) · ${slots.sumOf { it.won }} gagné(s)",
+            ) {
+                HourBars(slots)
+            }
+        }
+
+        // ── Anti-blocage ───────────────────────────────────────────────────
+        item {
+            val (levelText, levelColor) = antibanLevel(heartbeat?.antiban ?: "normal", heartbeat?.pauseUntil ?: 0L)
+            SectionCard(
+                title = "🛡️ Anti-blocage Binance",
+                subtitle = "${heartbeat?.fails ?: 0} code(s) faux d'affilée",
+                trailing = { Pill(levelText, levelColor) },
+            ) {
+                AntibanGauge(
+                    fails = heartbeat?.fails ?: 0,
+                    selectiveAt = heartbeat?.selectiveAt ?: snapshot.config.antibanSelectiveAt.toIntOrNull() ?: 8,
+                    stopAt = heartbeat?.stopAt ?: if (snapshot.config.antibanMode == "stop") {
+                        snapshot.config.antibanStopAt.toIntOrNull() ?: 9
+                    } else {
+                        0
+                    },
+                )
+                if (heartbeat?.antiban == "halt") {
+                    Banner(
+                        "⛔",
+                        "Le bot ne tape plus aucun code. Pour reprendre : réclame toi-même un code qui marche dans " +
+                            "l'appli Binance, puis envoie #reprendre dans tes Messages enregistrés Telegram.",
+                        AppColors.danger,
+                    )
+                }
+                if (heartbeat == null) Hint("Démarre le bot pour suivre le compteur en direct.")
+            }
+        }
+
+        // ── Derniers codes ─────────────────────────────────────────────────
+        item {
+            val items = snapshot.activity.items.take(5)
+            SectionCard(
+                title = "🎁 Derniers codes",
+                trailing = {
+                    TextButton(onClick = { onNavigate(Routes.ACTIVITY) }) { Text("Tout voir →") }
+                },
+            ) {
+                if (items.isEmpty()) {
+                    EmptyState("📭", "Aucun code pour l'instant", "Les codes trouvés sur Telegram et X s'afficheront ici.")
+                } else {
+                    items.forEachIndexed { index, entry ->
+                        if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        ClaimRow(entry)
+                    }
+                }
+            }
+        }
+
+        item { AboutFooter() }
+    }
+
+    if (confirmStop) {
+        AlertDialog(
+            onDismissRequest = { confirmStop = false },
+            title = { Text("⏹️ Arrêter le bot ?") },
+            text = {
+                Text(
+                    "Plus aucun code ne sera réclamé par le téléphone jusqu'à ce que tu le redémarres." +
+                        if (snapshot.config.botRole == "backup") " Le PC continue de réclamer s'il tourne." else "",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmStop = false
+                    vm.stop()
+                }) { Text("Arrêter") }
+            },
+            dismissButton = { TextButton(onClick = { confirmStop = false }) { Text("Annuler") } },
         )
-        val installedAt = remember { AppVersion.installedAt(context) }
+    }
+}
+
+/** Cartes de chiffres : gains du jour, gagnés, détectés, réussite, latence, refusés. */
+@Composable
+private fun StatsGrid(snapshot: Snapshot) {
+    val heartbeat = snapshot.liveHeartbeat
+    val activity = snapshot.activity
+    val gains = activity.gainsToday.entries.sortedByDescending { it.value }
+    val gainValue = gains.firstOrNull()?.let { "${Format.amount(it.value)} ${it.key}" } ?: "0"
+    val gainCaption = buildList {
+        if (activity.gainsTodayUsd > 0) add("≈ ${Format.usd(activity.gainsTodayUsd)}")
+        if (gains.size > 1) add("+ ${gains.size - 1} autre(s) crypto")
+    }.joinToString(" · ").ifEmpty { "aujourd'hui" }
+    val claimed = heartbeat?.claimed ?: 0
+    val won = heartbeat?.won ?: 0
+
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+            StatCard("💰", gainValue, "gains du jour", Modifier.weight(1.3f), accent = AppColors.gold, caption = gainCaption)
+            StatCard("🏆", "$won", "gagnés", Modifier.weight(1f), caption = "depuis le démarrage")
+            StatCard("🎁", "${heartbeat?.detected ?: 0}", "détectés", Modifier.weight(1f), caption = "depuis le démarrage")
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+            StatCard(
+                "🎯",
+                if (claimed > 0) "${won * 100 / claimed} %" else "—",
+                "réussite",
+                Modifier.weight(1f),
+                caption = "$claimed tenté(s)",
+            )
+            StatCard(
+                "⚡",
+                Format.latency(heartbeat?.avgWaitMs?.takeIf { claimed > 0 }),
+                "avant saisie",
+                Modifier.weight(1f),
+                caption = "en moyenne",
+            )
+            StatCard(
+                "❌",
+                "${heartbeat?.failed ?: 0}",
+                "refusés",
+                Modifier.weight(1f),
+                caption = heartbeat?.guarded?.takeIf { it > 0 }?.let { "🛡️ $it sauté(s)" } ?: "par Binance",
+            )
+        }
+    }
+}
+
+/** Version, date d'installation et auteur. */
+@Composable
+fun AboutFooter() {
+    val context = LocalContext.current
+    val installedAt = remember { AppVersion.installedAt(context) }
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = Spacing.l),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Hint("🧧 Red Packet Bot · version ${AppVersion.label}")
+        if (installedAt > 0) Hint("installée le ${Status.dateTime(installedAt)}")
         Text(
-            "Version ${AppVersion.label}" +
-                (if (installedAt > 0) ", installée le ${Status.dateTime(installedAt)}" else "") + ".",
-            fontSize = 12.sp,
-            color = Color.DarkGray,
-            modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+            "Developed by Kevin Armache",
+            style = MaterialTheme.typography.labelMedium,
+            color = AppColors.gold,
+            modifier = Modifier.padding(top = 4.dp),
         )
     }
 }

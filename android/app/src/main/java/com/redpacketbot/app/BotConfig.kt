@@ -26,68 +26,94 @@ data class BotConfig(
     val antibanSelectiveAt: String = "8",
     val antibanStopAt: String = "9",
     val antibanStopResumeH: String = "0",
+    // 🐦 X (Twitter) : notifications de l'appli X lues par le téléphone (src/xsource.js)
+    val xEnabled: Boolean = false,
+    val xAccounts: String = "",
+    val xDryRun: Boolean = false,
 ) {
     /** Canaux, un par entrée (virgules ou retours à la ligne acceptés). */
     val channelList: List<String>
         get() = targetChannels.split(',', '\n', ';').map { it.trim() }.filter { it.isNotEmpty() }
 
+    /** Comptes X, sans @, en minuscules. */
+    val xAccountList: List<String>
+        get() = xAccounts.split(',', '\n', ';', ' ').map { it.trim().removePrefix("@").lowercase() }
+            .filter { it.isNotEmpty() }.distinct()
+
     val isComplete: Boolean get() = validate().isEmpty()
 
     /** Problèmes bloquants, en français, prêts à afficher. */
-    fun validate(): List<String> {
-        val errors = mutableListOf<String>()
+    fun validate(): List<String> = fieldErrors().map { it.second }
+
+    /**
+     * Problèmes bloquants, chacun avec son champ (clé de toJson) : l'écran
+     * Réglages les affiche sous le bon champ.
+     */
+    fun fieldErrors(): List<Pair<String, String>> {
+        val errors = mutableListOf<Pair<String, String>>()
         if (!apiId.trim().matches(Regex("\\d{3,12}"))) {
-            errors += "API_ID : un nombre (my.telegram.org → API development tools)."
+            errors += "apiId" to "API_ID : un nombre (my.telegram.org → API development tools)."
         }
         val hash = apiHash.trim()
         if (!hash.matches(Regex("[0-9a-fA-F]{32}"))) {
-            errors += "API_HASH : 32 caractères (chiffres et lettres a à f)."
+            errors += "apiHash" to "API_HASH : 32 caractères (chiffres et lettres a à f)."
         } else if (hash.lowercase() == EXAMPLE_API_HASH) {
-            errors += "API_HASH : c'est la valeur d'exemple, mets la tienne."
+            errors += "apiHash" to "API_HASH : c'est la valeur d'exemple, mets la tienne."
         }
         if (!phoneNumber.replace(" ", "").matches(Regex("\\+\\d{6,15}"))) {
-            errors += "Numéro : format international, par exemple +243812345678."
+            errors += "phoneNumber" to "Numéro : format international, par exemple +243812345678."
         }
         val channels = channelList
         if (channels.isEmpty()) {
-            errors += "Canaux : au moins un (@pseudo, lien t.me ou ID -100…)."
+            errors += "targetChannels" to "Canaux : au moins un (@pseudo, lien t.me ou ID -100…)."
         }
         for (channel in channels) {
             val bare = bareChannel(channel)
             if (!bare.matches(ID) && !bare.matches(USERNAME)) {
-                errors += "Canal « $channel » : mets @pseudo, un lien t.me/pseudo ou un ID numérique."
+                errors += "targetChannels" to
+                    "Canal « $channel » : mets @pseudo, un lien t.me/pseudo ou un ID numérique."
             }
         }
-        if (botRole !in listOf("backup", "solo")) errors += "Rôle : « backup » ou « solo »."
-        if (notifyLevel !in listOf("off", "problems", "all")) errors += "Alertes : off, problems ou all."
+        if (botRole !in listOf("backup", "solo")) errors += "botRole" to "Rôle : « backup » ou « solo »."
+        if (notifyLevel !in listOf("off", "problems", "all")) {
+            errors += "notifyLevel" to "Alertes : off, problems ou all."
+        }
         val token = alertBotToken.trim()
         if (token.isNotEmpty() && !token.matches(Regex("\\d{5,}:[A-Za-z0-9_-]{30,}"))) {
-            errors += "Jeton du bot d'alertes : format 123456789:ABC… (donné par @BotFather)."
+            errors += "alertBotToken" to "Jeton du bot d'alertes : format 123456789:ABC… (donné par @BotFather)."
         }
         if (maxMessageAgeS.isNotBlank() && maxMessageAgeS.trim().toIntOrNull() == null) {
-            errors += "Fraîcheur max : un nombre de secondes (180 conseillé)."
+            errors += "maxMessageAgeS" to "Fraîcheur max : un nombre de secondes (180 conseillé)."
         }
-        errors += validateAntiban()
+        errors += antibanErrors()
+        for (account in xAccountList) {
+            if (!account.matches(X_HANDLE)) {
+                errors += "xAccounts" to
+                    "Compte X « $account » : un pseudo de 1 à 15 lettres, chiffres ou _ (ex. @binance)."
+            }
+        }
         return errors
     }
 
     /** Seuils de l'anti-blocage : le 10e code faux (blocage Binance) n'est jamais permis. */
-    private fun validateAntiban(): List<String> {
-        val errors = mutableListOf<String>()
-        if (antibanMode !in listOf("stop", "light")) errors += "Anti-blocage : « stop » ou « light »."
+    private fun antibanErrors(): List<Pair<String, String>> {
+        val errors = mutableListOf<Pair<String, String>>()
+        if (antibanMode !in listOf("stop", "light")) errors += "antibanMode" to "Anti-blocage : « stop » ou « light »."
         val selective = antibanSelectiveAt.trim().toIntOrNull()
         if (selective == null || selective !in 0..9) {
-            errors += "Anti-blocage : codes clairs à partir de 0 à 9 codes faux (0 = jamais)."
+            errors += "antibanSelectiveAt" to "Anti-blocage : codes clairs à partir de 0 à 9 codes faux (0 = jamais)."
         }
         if (antibanMode == "stop") {
             val stop = antibanStopAt.trim().toIntOrNull()
             val min = maxOf(1, selective ?: 1)
             if (stop == null || stop !in min..9) {
-                errors += "Anti-blocage : arrêt entre $min et 9 codes faux (jamais 10 : c'est le blocage)."
+                errors += "antibanStopAt" to
+                    "Anti-blocage : arrêt entre $min et 9 codes faux (jamais 10 : c'est le blocage)."
             }
             val resume = antibanStopResumeH.trim().toIntOrNull()
             if (resume == null || resume !in 0..168) {
-                errors += "Anti-blocage : reprise automatique entre 0 et 168 h (0 = #reprendre)."
+                errors += "antibanStopResumeH" to
+                    "Anti-blocage : reprise automatique entre 0 et 168 h (0 = #reprendre)."
             }
         }
         return errors
@@ -102,7 +128,15 @@ data class BotConfig(
         } else {
             null
         }
-    }
+    } + listOfNotNull(
+        if (xEnabled && xAccountList.isEmpty()) {
+            "X : aucun compte choisi, toutes les notifications de l'appli X seront lues, suggestions " +
+                "comprises. Une liste de comptes est conseillée."
+        } else {
+            null
+        },
+        if (xEnabled && xDryRun) "X : essai à blanc actif, aucun code X ne sera tapé sur Binance." else null,
+    )
 
     /** Variables d'environnement pour le bot (Node.js). */
     fun toEnv(): Map<String, String> = buildMap {
@@ -124,6 +158,9 @@ data class BotConfig(
         put("ANTIBAN_SELECTIVE_AT", antibanSelectiveAt.trim().ifEmpty { "8" })
         put("ANTIBAN_STOP_AT", antibanStopAt.trim().ifEmpty { "9" })
         put("ANTIBAN_STOP_RESUME_H", antibanStopResumeH.trim().ifEmpty { "0" })
+        put("X_ENABLED", xEnabled.toString())
+        put("X_ACCOUNTS", xAccountList.joinToString(","))
+        put("X_DRY_RUN", xDryRun.toString())
     }
 
     fun toJson(): JSONObject = JSONObject().apply {
@@ -144,6 +181,9 @@ data class BotConfig(
         put("antibanSelectiveAt", antibanSelectiveAt)
         put("antibanStopAt", antibanStopAt)
         put("antibanStopResumeH", antibanStopResumeH)
+        put("xEnabled", xEnabled)
+        put("xAccounts", xAccounts)
+        put("xDryRun", xDryRun)
     }
 
     fun save(file: File) = file.writeTextAtomic(toJson().toString(2))
@@ -171,6 +211,11 @@ data class BotConfig(
             antibanSelectiveAt = pick("ANTIBAN_SELECTIVE_AT", antibanSelectiveAt),
             antibanStopAt = pick("ANTIBAN_STOP_AT", antibanStopAt),
             antibanStopResumeH = pick("ANTIBAN_STOP_RESUME_H", antibanStopResumeH),
+            xEnabled = env["X_ENABLED"]?.let { it.trim().lowercase() == "true" } ?: xEnabled,
+            xAccounts = env["X_ACCOUNTS"]?.takeIf { it.isNotBlank() }
+                ?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.joinToString(", ")
+                ?: xAccounts,
+            xDryRun = env["X_DRY_RUN"]?.let { it.trim().lowercase() == "true" } ?: xDryRun,
         )
     }
 
@@ -178,6 +223,7 @@ data class BotConfig(
         private const val EXAMPLE_API_HASH = "abcdef1234567890abcdef1234567890"
         private val ID = Regex("-?\\d+")
         private val USERNAME = Regex("[A-Za-z][A-Za-z0-9_]{3,31}")
+        private val X_HANDLE = Regex("[a-z0-9_]{1,15}")
 
         /** « https://t.me/nom/ », « t.me/nom », « @nom » → « nom » ; un ID reste tel quel. */
         fun bareChannel(raw: String): String = raw.trim()
@@ -215,6 +261,9 @@ data class BotConfig(
             antibanSelectiveAt = o.optString("antibanSelectiveAt", "8"),
             antibanStopAt = o.optString("antibanStopAt", "9"),
             antibanStopResumeH = o.optString("antibanStopResumeH", "0"),
+            xEnabled = o.optBoolean("xEnabled", false),
+            xAccounts = o.optString("xAccounts"),
+            xDryRun = o.optBoolean("xDryRun", false),
         )
 
         /** Lecture d'un fichier .env : CLÉ=valeur, commentaires #, guillemets. */

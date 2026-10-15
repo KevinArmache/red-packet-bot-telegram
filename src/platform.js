@@ -13,12 +13,12 @@ const ANDROID_APP = process.env.BOT_PLATFORM === "android";
 const hints = {
   /** Session Telegram à refaire, sans personne devant l'écran. */
   telegramLogin: ANDROID_APP
-    ? "ouvre l'app Red Packet Bot → « Connexion Telegram »"
+    ? "ouvre l'app Red Packet Bot → 📡 Sources → ✈️ Telegram"
     : "refais la connexion avec « node index.js --setup »",
 
   /** Session Binance à refaire. */
   binanceLogin: ANDROID_APP
-    ? "ouvre l'app Red Packet Bot → « Connexion Binance »"
+    ? "ouvre l'app Red Packet Bot → 📡 Sources → 🔐 Binance (ou touche la notification)"
     : "connecte-toi dans la fenêtre Chromium du bot",
 
   /** Comment arrêter le bot. */

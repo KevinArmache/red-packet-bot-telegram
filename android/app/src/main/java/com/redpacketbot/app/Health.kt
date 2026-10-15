@@ -30,6 +30,8 @@ object Health {
         val ok: Boolean?,
         val detail: String,
         val actionLabel: String? = null,
+        /** Indispensable au bot (le reste est recommandé). */
+        val critical: Boolean = false,
         val intent: (Context) -> Intent? = { null },
     )
 
@@ -51,6 +53,7 @@ object Health {
             "Indispensable sur Tecno : la notification « Bot en marche » (avec son chronomètre) empêche HiOS " +
                 "de geler le bot. Ne la désactive pas, et laisse aussi passer les demandes de reconnexion.",
             "Autoriser",
+            critical = true,
         ) {
             if (appNotificationsOk) {
                 Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
@@ -65,6 +68,7 @@ object Health {
             "battery", "Batterie : sans restriction", power.isIgnoringBatteryOptimizations(pkg),
             "Le réglage le plus important : sans lui, Android coupe le bot écran éteint.",
             "Autoriser",
+            critical = true,
         ) {
             Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$pkg"))
         }
@@ -74,6 +78,7 @@ object Health {
             "Réglages → Applis → Red Packet Bot → Batterie : « Autoriser l'activité en arrière-plan » " +
                 "activé, et « Arrêter l'appli inactive » désactivé.",
             "Ouvrir",
+            critical = true,
         ) { appDetails(pkg) }
 
         val dataRestricted = connectivity.restrictBackgroundStatus ==
@@ -82,6 +87,7 @@ object Health {
             "data", "Données en arrière-plan", !dataRestricted,
             "L'économiseur de données ne doit pas couper Internet au bot.",
             "Ouvrir",
+            critical = true,
         ) {
             Intent(Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS, Uri.parse("package:$pkg"))
         }
@@ -92,6 +98,7 @@ object Health {
             "alarms", "Relance à l'heure exacte", exactOk,
             "Permet de relancer le bot à l'heure prévue après un arrêt, même téléphone en veille.",
             "Ouvrir",
+            critical = true,
         ) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$pkg"))
@@ -105,6 +112,7 @@ object Health {
             "time", "Heure automatique", autoTime,
             "Le bot compare l'heure du téléphone à celle de Telegram : une horloge fausse fait tout ignorer.",
             "Ouvrir",
+            critical = true,
         ) { Intent(Settings.ACTION_DATE_SETTINGS) }
 
         val pageSize = Os.sysconf(OsConstants._SC_PAGESIZE)
@@ -112,6 +120,7 @@ object Health {
             "pagesize", "Compatibilité Node.js", pageSize == 4096L,
             if (pageSize == 4096L) "Mémoire en pages de 4 Ko : Node.js mobile fonctionne."
             else "Pages mémoire de ${pageSize / 1024} Ko : Node.js mobile risque de ne pas démarrer.",
+            critical = true,
         )
 
         // HiOS « AI Net » : coupe le Wi-Fi et les données pendant le sommeil
@@ -155,7 +164,49 @@ object Health {
             "Écran d'accueil : appui long → Paramètres du bureau → Autres réglages → Congélateur (Freezer) : " +
                 "vérifie que Red Packet Bot n'y est pas.",
         )
+
+        if (BotConfig.load(AppFiles(context).config).xEnabled) items += xItems(context, power)
         return items
+    }
+
+    /** 🐦 Lecture des notifications de l'appli X (réglage X activé). */
+    private fun xItems(context: Context, power: PowerManager): List<Item> {
+        val installed = XNotificationListener.isXInstalled(context)
+        val x = XNotificationListener.X_PACKAGE
+        return listOfNotNull(
+            Item(
+                "x_access", "🐦 X : accès aux notifications", XNotificationListener.isAccessGranted(context),
+                "Sans lui, le bot ne voit pas les posts X. Si Android grise l'interrupteur (« paramètre restreint ») : " +
+                    "Réglages → Applis → Red Packet Bot → ⋮ → « Autoriser les paramètres restreints », puis réessaie.",
+                "Autoriser",
+                critical = true,
+            ) { XNotificationListener.settingsIntent(it) },
+            Item(
+                "x_app", "🐦 Appli X installée et connectée", installed,
+                "Installe X, connecte-toi, puis active la cloche « Tous les posts » sur chaque compte à suivre.",
+                if (installed) null else "Installer",
+                critical = true,
+            ) { Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$x")) },
+            if (installed) {
+                Item(
+                    "x_battery", "🐦 X : batterie sans restriction", power.isIgnoringBatteryOptimizations(x),
+                    "Sinon Android retarde les notifications de X écran éteint : les codes arrivent trop tard. " +
+                        "Réglages → Applis → X → Batterie → « Sans restriction ».",
+                    "Ouvrir",
+                ) { appDetails(x) }
+            } else {
+                null
+            },
+            if (installed) {
+                Item(
+                    "x_autostart", "🐦 Tecno : démarrage auto de X", null,
+                    "Phone Master → Gestion du démarrage auto → active aussi X, sinon HiOS bloque ses notifications.",
+                    "Ouvrir Phone Master",
+                ) { phoneMasterAutoStart(it) }
+            } else {
+                null
+            },
+        )
     }
 
     private fun appDetails(pkg: String) =

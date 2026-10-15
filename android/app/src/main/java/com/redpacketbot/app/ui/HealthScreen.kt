@@ -1,101 +1,114 @@
 package com.redpacketbot.app.ui
 
-import android.content.ActivityNotFoundException
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import android.provider.Settings
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redpacketbot.app.Health
-import kotlinx.coroutines.delay
+import com.redpacketbot.app.ui.components.Banner
+import com.redpacketbot.app.ui.components.CheckRow
+import com.redpacketbot.app.ui.components.Hint
+import com.redpacketbot.app.ui.components.ScreenHeader
+import com.redpacketbot.app.ui.components.ScreenList
+import com.redpacketbot.app.ui.components.SectionCard
+import com.redpacketbot.app.ui.theme.AppColors
+import com.redpacketbot.app.ui.theme.NumberStyle
+import com.redpacketbot.app.ui.theme.Spacing
 
 @Composable
-fun HealthScreen() {
-    val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences("health", Context.MODE_PRIVATE) }
-    // Revérifié toutes les 2 s : tu reviens des réglages Android, l'écran se met à jour
-    var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(2000)
-            tick++
-        }
-    }
-    val items = remember(tick) { Health.check(context) }
-    val snapshot by rememberSnapshot()
+fun HealthScreen(vm: BotViewModel, onBack: () -> Unit) {
+    val snapshot by vm.snapshot.collectAsStateWithLifecycle()
+    val health by vm.health.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { vm.refreshHealth() }
+    val critical = health.items.filter { it.critical }
+    val recommended = health.items.filter { !it.critical }
 
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
-        Section("🩺 Santé du téléphone") {
-            Hint(
-                "Sans ces réglages, Android (et Phone Master sur Tecno) finit par couper le bot écran " +
-                    "éteint. Fais-les une fois ; les points ✅ sont vérifiés automatiquement, coche les autres " +
-                    "quand c'est fait.",
-            )
-            val heartbeat = snapshot.heartbeat
-            if (snapshot.isRunning && heartbeat != null) {
-                Hint(
-                    if (heartbeat.sleeps == 0) "💤 Aucune mise en veille forcée détectée depuis le démarrage."
-                    else "💤 Android a endormi le bot ${heartbeat.sleeps} fois depuis le démarrage : refais les réglages.",
-                    if (heartbeat.sleeps == 0) Green else Orange,
+    ScreenList {
+        item { ScreenHeader("🩺 Santé du téléphone", "Ce qu'Android doit laisser faire au bot, 24 h/24", onBack = onBack) }
+        item {
+            SectionCard {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    val color = when {
+                        health.criticalMissing > 0 -> AppColors.danger
+                        health.okCount < health.total -> AppColors.warning
+                        else -> AppColors.success
+                    }
+                    Text("${health.okCount}/${health.total}", style = NumberStyle.copy(color = color))
+                    Hint(
+                        when {
+                            health.criticalMissing > 0 -> "🚨 ${health.criticalMissing} réglage(s) indispensable(s) à corriger"
+                            health.okCount < health.total -> "Encore quelques points recommandés"
+                            else -> "✨ Tout est en ordre"
+                        },
+                    )
+                }
+                LinearProgressIndicator(
+                    progress = { if (health.total == 0) 0f else health.okCount / health.total.toFloat() },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = AppColors.gold,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                 )
-            }
-        }
-        Section("Réglages") {
-            items.forEachIndexed { index, item ->
-                if (index > 0) HorizontalDivider()
-                val manualDone = prefs.getBoolean(item.key, false)
-                CheckRow(
-                    ok = item.ok ?: if (manualDone) true else null,
-                    title = item.title,
-                    detail = item.detail,
-                ) {
-                    Column {
-                        item.actionLabel?.let { label ->
-                            OutlinedButton(onClick = { open(context, item.intent(context)) }) { Text(label) }
-                        }
-                        if (item.ok == null) {
-                            Checkbox(checked = manualDone, onCheckedChange = {
-                                prefs.edit().putBoolean(item.key, it).apply()
-                                tick++
-                            })
-                        }
+                Hint(
+                    "Sans ces réglages, Android (et Phone Master sur Tecno) finit par couper le bot écran éteint. " +
+                        "Les points ✅ sont vérifiés tout seuls ; coche les autres quand c'est fait.",
+                )
+                val heartbeat = snapshot.liveHeartbeat
+                if (heartbeat != null) {
+                    if (heartbeat.sleeps == 0) {
+                        Banner("💤", "Aucune mise en veille forcée détectée depuis le démarrage.", AppColors.success)
+                    } else {
+                        Banner("💤", "Android a endormi le bot ${heartbeat.sleeps} fois depuis le démarrage : refais les réglages.", AppColors.warning)
                     }
                 }
             }
         }
-        Section("🧪 Test conseillé") {
-            Hint(
-                "Démarre le bot, verrouille le téléphone 10 minutes, puis reviens ici : si « Android a endormi " +
-                    "le bot » apparaît, un réglage manque (souvent Phone Master ou la batterie).",
-            )
+        item { SectionCard(title = "🚨 Indispensables") { HealthList(vm, health, critical) } }
+        if (recommended.isNotEmpty()) {
+            item { SectionCard(title = "👍 Recommandés") { HealthList(vm, health, recommended) } }
+        }
+        item {
+            SectionCard(title = "🧪 Test conseillé") {
+                Hint(
+                    "Démarre le bot, verrouille le téléphone 10 minutes, puis reviens ici : si « Android a endormi " +
+                        "le bot » apparaît, un réglage manque (souvent Phone Master ou la batterie).",
+                )
+            }
         }
     }
 }
 
-private fun open(context: Context, intent: Intent?) {
-    val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
-    try {
-        context.startActivity((intent ?: fallback).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    } catch (_: ActivityNotFoundException) {
-        context.startActivity(fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    } catch (_: SecurityException) {
-        context.startActivity(fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+/** Liste de réglages à vérifier, chacun avec son bouton et, si manuel, sa case à cocher. */
+@Composable
+fun HealthList(vm: BotViewModel, report: HealthReport, items: List<Health.Item>) {
+    val context = LocalContext.current
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
+        items.forEachIndexed { index, item ->
+            if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            CheckRow(report.isDone(item), item.title, item.detail) {
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    item.actionLabel?.let { label ->
+                        if (item.ok != true) {
+                            OutlinedButton(onClick = { open(context, item.intent(context)) }) { Text(label) }
+                        }
+                    }
+                    if (item.ok == null) {
+                        Checkbox(checked = report.manual[item.key] == true, onCheckedChange = { vm.setManualDone(item.key, it) })
+                    }
+                }
+            }
+        }
     }
 }

@@ -148,6 +148,14 @@ class BotService : Service() {
             )
         }
         Status.lastError(state)?.let { out.println("lastError: $it") }
+        val config = BotConfig.load(files.config)
+        val x = XListenerState.read(files.xListener)
+        out.println(
+            "x: enabled=${config.xEnabled} dryRun=${config.xDryRun} access=${XNotificationListener.isAccessGranted(this)} " +
+                "listener=${x.connected} posts=${x.posts} dropped=${x.dropped} " +
+                "lastPost=${if (x.lastPostAt > 0) "il y a ${Status.ago(System.currentTimeMillis() - x.lastPostAt)}" else "aucun"} " +
+                "botCodes=${heartbeat?.xCodes ?: 0}",
+        )
         // « pump 30000 » : pompe d'images de la WebView pendant 30 s (mesures par
         // câble). dump() tourne sur le fil principal, comme la pompe.
         val pumpArg = args?.indexOf("pump") ?: -1
@@ -482,6 +490,18 @@ class BotService : Service() {
         Notifications.cancel(this, Notifications.ID_BINANCE)
     }
 
+    /**
+     * 🐦 Notification de l'appli X (XNotificationListener, même processus) :
+     * transmise au bot. false si le bot ne tourne pas (rien n'est gardé : le
+     * post serait périmé au démarrage).
+     */
+    fun onXNotification(data: JSONObject): Boolean {
+        val target = bridge
+        if (!nodeRunning || target == null) return false
+        scheduler.execute { target.event("x.post", data) }
+        return true
+    }
+
     // ─── WebView de réclamation (jamais affichée) ──────────────────────────
 
     @SuppressLint("ClickableViewAccessibility")
@@ -680,7 +700,7 @@ class BotService : Service() {
             restartRequested || files.telegramLoginRequest.exists() -> scheduleRestart(1_000, "Redémarrage…")
             code == EXIT_LOGIN_REQUIRED -> {
                 BotState.setStatus(files, BotState.TELEGRAM_REQUIRED,
-                    "Session Telegram expirée : ouvre « Connexion Telegram ».")
+                    "Session Telegram expirée : ouvre 📡 Sources → ✈️ Telegram.")
                 Notifications.action(this, Notifications.ID_TELEGRAM, "🔑 Telegram : reconnecte-toi",
                     "La session Telegram du téléphone n'est plus valide. Touche ici puis « Se connecter ».",
                     Notifications.openApp(this, MainActivity.SCREEN_TELEGRAM, 3))
@@ -803,6 +823,8 @@ class BotService : Service() {
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(text)
+            // Notification dépliée : toute la ligne (gains, anti-ban, X)
+            .setStyle(Notification.BigTextStyle().bigText(text))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             // Chronomètre « en marche depuis » : indispensable sur Tecno (HiOS).

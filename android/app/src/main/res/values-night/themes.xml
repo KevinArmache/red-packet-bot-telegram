@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Thème sombre « rouge & or » : pas d'éclair blanc au lancement -->
+    <style name="Theme.RedPacketBot" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0E0E12</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Thème clair (le thème sombre est dans values-night) : fond affiché au lancement,
+         avant l'interface Compose. Barres système transparentes (bord à bord). -->
     <style name="Theme.RedPacketBot" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:statusBarColor">#B71C1C</item>
         <item name="android:windowBackground">#FFF8F6</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>

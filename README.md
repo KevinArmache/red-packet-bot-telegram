@@ -38,8 +38,9 @@
 - **📡 100+ canaux sans angle mort** — écoute active avant même la résolution des canaux, résolution groupée, canaux adoptés à la volée, groupes de discussion liés.
 - **🛡️ Protections anti-ban** — une seule soumission par code, un code à la fois, anti-doublons 48 h, **anti-blocage** (le bot compte les codes faux d'affilée et ne tape jamais le 10e, qui bloquerait les Red Packets 5 h), pause seulement sur un vrai blocage Binance, navigateur furtif, session Binance expirée détectée sans jamais taper un code au mauvais endroit.
 - **🔔 Alertes qui sonnent vraiment** — via ton propre bot Telegram (@BotFather) : gains, reconnexions à faire, pauses, plantages, bilan quotidien.
+- **🐦 Codes publiés sur X (Twitter)** — le téléphone lit les notifications de l'appli X (comptes suivis avec la cloche) : ni scraping, ni API, rien que X puisse bloquer. Mêmes règles et même anti-blocage que Telegram ; quand le PC réclame, le téléphone lui transmet les codes (`#xcode`).
 - **🤝 Relais PC ⇄ téléphone** — le PC a la priorité, le téléphone prend le relais dès que le PC s'arrête. Un seul appareil réclame à la fois, pour ne pas soumettre deux fois le même code.
-- **📱 App Android 24/7** — une APK fabriquée en une commande (`npm run apk`), réglages et connexions dans l'app (Binance en plein écran), service permanent, relance automatique (plantage, redémarrage du téléphone, mise à jour).
+- **📱 App Android 24/7** — une APK fabriquée en une commande (`npm run apk`), thème sombre « rouge & or » (clair si le téléphone est en mode clair), assistant de démarrage, réglages et connexions dans l'app (Binance en plein écran), tableau de bord (gains, graphique 24 h, jauge anti-blocage, relais, stats par canal), service permanent, relance automatique (plantage, redémarrage du téléphone, mise à jour).
 - **♻️ Robuste** — Chromium relancé tout seul s'il plante, reconnexion Telegram automatique, arrêt propre avec `Ctrl+C`.
 - **📊 Logs lisibles** — heure locale, niveaux alignés et colorés, bilan d'activité périodique.
 
@@ -158,11 +159,13 @@ L'APK arrive dans `dist/RedPacketBot.apk`. Copie-la sur le téléphone (câble U
 
 ### Dans l'app, la première fois
 
-1. **Réglages** → importe ton `.env` (partage du fichier `bot.env` depuis Telegram, fichier, ou copier-coller), vérifie, **Enregistrer**. Le rôle reste **secours du PC** (`backup`).
-2. **Connexion Telegram** → **Se connecter** → tape le code reçu dans Telegram (et ton mot de passe 2FA). Le téléphone a sa propre session sur le même compte.
-3. **Connexion Binance** → connecte-toi en plein écran, avec le clavier du téléphone. L'écran se ferme tout seul une fois connecté.
-4. **Santé** → les réglages Android et Tecno pour que le bot ne soit jamais coupé (batterie sans restriction, démarrage auto et applis protégées dans Phone Master…).
-5. **Accueil** → **▶️ Démarrer**, puis **Alerte de test**.
+L'**assistant 🧭** s'ouvre tout seul et te guide en 5 étapes (il se relance depuis **⚙️ Réglages**) :
+
+1. **✈️ Telegram** → importe ton `.env` (partage du fichier `bot.env` depuis Telegram, fichier, ou copier-coller), puis **Se connecter** et tape le code reçu dans Telegram (et ton mot de passe 2FA). Le téléphone a sa propre session sur le même compte. Le rôle reste **secours du PC** (`backup`).
+2. **🔐 Binance** → connecte-toi en plein écran, avec le clavier du téléphone. L'écran se ferme tout seul une fois connecté.
+3. **🐦 X** (facultatif) → active la lecture des posts X et donne l'accès aux notifications ([détails](GUIDE-ANDROID.md#7-bis-les-codes-publiés-sur-x-twitter)).
+4. **📱 Téléphone** → les réglages Android indispensables pour que le bot ne soit jamais coupé ; les réglages Tecno recommandés (Phone Master…) sont dans **🩺 Santé**.
+5. **🔔 Alerte de test**, puis le bot tourne : le grand bouton rond de l'**🏠 Accueil** le démarre ou l'arrête.
 
 ### Une fois lancé
 
@@ -173,9 +176,9 @@ L'APK arrive dans `dist/RedPacketBot.apk`. Copie-la sur le téléphone (câble U
   - bot figé (aucun signe de vie depuis 5 min) ;
   - après un redémarrage du téléphone (après le premier déverrouillage) et après une mise à jour de l'app ;
   - filet de sécurité toutes les 15 min.
-- **Seul le bouton ⏹️ Arrêter l'arrête durablement** : c'est un arrêt propre, le PC est prévenu tout de suite.
+- **Seul le bouton rond de l'Accueil (ou « Arrêter » dans la notification) l'arrête durablement** : c'est un arrêt propre, le PC est prévenu tout de suite.
 - **Veille** : quand le PC est actif, le téléphone laisse les codes au PC et ferme la page Binance après 2 min (mémoire libérée).
-- **Logs** : onglet **Logs** de l'app (fichier `logs/bot.log` dans le stockage privé de l'app, archivé à 5 Mo).
+- **Logs** : onglet **📜 Activité** → **🖥️ Logs** de l'app (fichier `logs/bot.log` dans le stockage privé de l'app, archivé à 5 Mo). L'onglet **🎁 Codes** liste les 50 derniers codes et leur résultat (fichier `bot-data/.run/activity.json`, écrit par `src/activity.js`).
 
 ### Limites, en toute honnêteté
 
@@ -231,6 +234,15 @@ Dès que le PC redevient actif, le téléphone repasse en veille.
 [07/10 23:15:20] ✅ OK    — 📱 Relais : le téléphone prend la main — le PC s'est arrêté
 ```
 
+**Codes X relayés.** Seul le téléphone voit les posts X. Quand il est en veille, il transmet chaque code X au PC par un message silencieux dans les Messages enregistrés, supprimé après 10 min :
+
+```
+#xcode A7K2M9QX src=label from=@binance at=1791400000000 inst=3f9a1c2e
+🐦 Code X relayé par 📱 Téléphone — ne pas modifier
+```
+
+Les deux appareils jugent ce message sur sa **date serveur Telegram**, avec la même règle que pour un code de canal : un code n'est jamais soumis deux fois, et si le téléphone reprend le relais entre-temps, c'est lui qui le réclame. Un `#xcode` de plus de 30 s, modifié ou mal formé est ignoré. Le PC annonce qu'il accepte ces codes par le jeton ` x=1` de sa ligne `#botrelay` ; un PC pas à jour ne l'a pas, et le téléphone envoie alors l'alerte « ⚠️ Le PC ne prend pas les codes X ».
+
 **Pause anti-ban partagée.** La limite Binance concerne le compte, pas l'appareil. L'appareil qui déclenche une pause la publie, l'autre la respecte : `🛑 Pause anti-ban partagée par le PC — aucun code jusqu'à 19:02`.
 
 **Deux appareils en `primary` ?** Chacun réclamerait chaque code. Le bot l'écrit en rouge dans les logs et t'envoie une alerte ⚠️. Un seul `primary` !
@@ -272,8 +284,8 @@ Un message que tu t'envoies dans tes Messages enregistrés **ne sonne jamais**. 
   → PC : connecte-toi dans la fenêtre Chromium du bot. Téléphone : touche la notification 🔑 (ou **Connexion Binance** dans l'app). En attendant, les codes sont ignorés sans brûler de tentative. Si c'est le PC, le téléphone prend le relais.
 - **✅ « Session Binance rétablie — les codes sont de nouveau réclamés. »** — 1 toutes les 10 min au plus.\
   → Rien à faire.
-- **🔑 « Session Telegram expirée : ouvre l'app Red Packet Bot → « Connexion Telegram » »** (téléphone) ou **« … refais la connexion avec « node index.js --setup » »** (serveur) — 1 toutes les 3 h au plus.\
-  → Téléphone : écran **Connexion Telegram** de l'app → **Se reconnecter**. Serveur : refais la connexion à la main. En attendant, le superviseur réessaie toutes les 30 min. Cette alerte n'existe qu'en mode sans surveillance (app Android, ou serveur avec `BOT_UNATTENDED=1`).
+- **🔑 « Session Telegram expirée : ouvre l'app Red Packet Bot → 📡 Sources → ✈️ Telegram »** (téléphone) ou **« … refais la connexion avec « node index.js --setup » »** (serveur) — 1 toutes les 3 h au plus.\
+  → Téléphone : **📡 Sources** → **✈️ Telegram** → **🔄 Se reconnecter**. Serveur : refais la connexion à la main. En attendant, le superviseur réessaie toutes les 30 min. Cette alerte n'existe qu'en mode sans surveillance (app Android, ou serveur avec `BOT_UNATTENDED=1`).
 - **🛑 « Blocage Binance (Red Packets verrouillés) — pause jusqu'à HH:MM… »** — 1 par heure au plus.\
   → Rien : la pause dure ce que Binance annonce (5 h par défaut) et elle est partagée avec l'autre appareil. Ça ne devrait plus arriver en mode `stop` (voir [Anti-blocage](#anti-blocage-binance)).
 - **🧩 « Binance demande un captcha — pause jusqu'à HH:MM… »** — 1 par heure au plus.\
@@ -347,6 +359,15 @@ Binance verrouille les Red Packets **5 h après 10 codes faux d'affilée** (FAQ 
 - **`ANTIBAN_STOP_AT`** — défaut `9` (mode `stop`, entre `ANTIBAN_SELECTIVE_AT` et `9`). À partir de ce nombre, plus aucun code n'est tapé, sur le PC comme sur le téléphone. Pour reprendre : réclame toi-même un code qui marche dans l'app Binance, puis envoie `#reprendre` dans tes « Messages enregistrés ».
 - **`ANTIBAN_STOP_RESUME_H`** — défaut `0` (manuelle). Reprise automatique après l'arrêt ⛔, en heures (jusqu'à 168). ⚠️ Elle suppose que le compteur de Binance est revenu à zéro tout seul : règle-la seulement après avoir vu l'alerte 🔄 dans tes logs.
 
+### X (Twitter)
+
+Voir le [guide Android](GUIDE-ANDROID.md#7-bis-les-codes-publiés-sur-x-twitter). Sur le téléphone, ces réglages sont dans **Réglages → 🐦 Codes publiés sur X**.
+
+- **`X_ENABLED`** — défaut `false`. Téléphone : lire les notifications de l'appli X (il faut aussi l'accès aux notifications).
+- **`X_ACCOUNTS`** — vide par défaut = tous les comptes suivis avec la cloche, suggestions de X comprises. Comptes séparés par des virgules, avec ou sans `@` (par exemple `@binance,@binance_fr`). Une liste est conseillée.
+- **`X_DRY_RUN`** — défaut `false`. Essai à blanc : détection, relais et anti-blocage tournent, mais aucun code n'est tapé sur Binance (« 🧪 Essai à blanc » dans les logs). Les notifications de test envoyées par adb ne sont lues que dans ce mode. Le PC suit l'essai à blanc annoncé dans chaque `#xcode`.
+- **`X_RELAY_ACCEPT`** — défaut `true`. PC : réclamer les codes X relayés par le téléphone (`#xcode`).
+
 ### Navigateur et Binance
 
 - **`BINANCE_LOGIN_TIMEOUT`** — défaut `300000` (5 min), en millisecondes. Temps maximum pour te connecter à Binance à la main quand le navigateur démarre. Au-delà, le bot s'arrête (`⏰ Timeout — connexion Binance non détectée`). `0` = attendre sans limite (c'est le cas sur le téléphone). Une session qui expire en cours de route n'a pas de délai : le bot attend ta reconnexion.
@@ -359,7 +380,7 @@ Binance verrouille les Red Packets **5 h après 10 codes faux d'affilée** (FAQ 
 Tu n'as pas à les écrire : l'app les donne au bot à chaque démarrage, en plus des valeurs de ses Réglages.
 
 - **`BOT_UNATTENDED=1`** — mode sans surveillance : jamais de demande de code Telegram au clavier. Si la session n'est plus valide, le bot envoie l'alerte 🔑 et s'arrête avec le code 78 (l'app réessaie toutes les 30 min). Accepte `1` ou `true`. Utile aussi sous PM2 ou systemd (voir [VPS](#-déploiement-sur-un-vps)).
-- **`BOT_HEARTBEAT_FILE`** — signe de vie réécrit toutes les 15 s (état du relais, du navigateur, codes), lu par l'app pour sa notification et son watchdog.
+- **`BOT_HEARTBEAT_FILE`** — signe de vie réécrit toutes les 15 s (état du relais, du navigateur, de l'autre appareil, codes, anti-blocage, X), lu par l'app pour sa notification, son watchdog et son écran d'accueil. Le journal d'activité `activity.json` (derniers codes, gains, graphique 24 h, stats par source) est écrit dans le même dossier.
 - **`BOT_LAST_EXIT_CODE`** — code de sortie du lancement précédent. S'il est supérieur à 0, l'alerte de démarrage est ♻️ « relancé » au lieu de 🟢 « en ligne ».
 - **`BOT_PLATFORM=android`** — les messages renvoient vers l'app (connexion Telegram ou Binance, arrêt, réglages du téléphone) ; la page Binance est la WebView de l'app.
 - **`BOT_DATA_DIR`** — dossier des données du bot (historique, session, alertes) dans le stockage privé de l'app. Sur le PC : la racine du projet.
@@ -479,6 +500,7 @@ Le bot analyse **toutes** les surfaces d'un message :
 - **Blocs `monospace` / `pre`** — un code posté entre backticks ;
 - **Aperçus de lien** — adresse, titre et description de l'aperçu ;
 - **Messages édités** — un canal qui publie un message, puis y **ajoute le code**. C'est l'heure de la modification qui compte.
+- **Posts X** (téléphone) — le texte de la notification de l'appli X et ses liens cachés. Les @mentions, #hashtags, $cashtags et liens `t.co` sont retirés avant l'analyse, ainsi que le dernier mot coupé par X (« … »). X n'a pas de `monospace` : ses codes sont « Code : », lien Cryptobox ou texte libre.
 
 ### Deux niveaux de confiance
 
@@ -613,6 +635,8 @@ red-packet-bot-telegram/
 │   ├── telegram.js        # Userbot Telegram (mtcute) + détection des codes
 │   ├── binance.js         # Automatisation Binance (Playwright)
 │   ├── relay.js           # Relais PC ⇄ téléphone (message #botrelay)
+│   ├── xsource.js         # Codes publiés sur X (notifications de l'appli X, relais #xcode)
+│   ├── activity.js        # Journal d'activité de l'app (derniers codes, gains, stats par source)
 │   ├── notifier.js        # Alertes via ton bot @BotFather
 │   ├── queue.js           # File d'attente : un code à la fois
 │   ├── history.js         # Anti-doublons 48 h (history.json)
@@ -622,9 +646,11 @@ red-packet-bot-telegram/
 │   ├── paths.js           # Dossier des données (BOT_DATA_DIR)
 │   └── platform.js        # Messages adaptés : PC/serveur ou app Android
 ├── android/               # App Android (APK)
-│   ├── app/               # Projet Android Studio (Kotlin) : service, écrans, WebView
+│   ├── app/               # Projet Android Studio (Kotlin) : service, écouteur X, WebView,
+│   │                      #   interface Compose (ui/ : écrans, ui/components, ui/theme)
 │   ├── node/entry.js      # Démarrage du bot dans l'app (Node.js mobile)
 │   └── scripts/build-apk.mjs  # « npm run apk » : compile l'APK
+├── test/guard.js          # « npm run test:guard » : anti-blocage, relais, extraction, X
 ├── test/claim-flow.js     # « npm run test:claim » : vérifie la réclamation sur le PC
 ├── GUIDE-ANDROID.md       # Guide de l'app Android
 ├── GUIDE-DEBOGAGE.md      # Déboguer l'app avec Claude (adb) + problèmes résolus
@@ -770,7 +796,7 @@ sudo journalctl -u cryptobox-bot -f
 | `🔑 Session Binance expirée — code … non soumis` | Reconnecte-toi : fenêtre Chromium (PC), ou notification 🔑 / **Connexion Binance** dans l'app (téléphone). |
 | `⏰ Timeout — connexion Binance non détectée` | Connecte-toi plus vite, ou augmente `BINANCE_LOGIN_TIMEOUT` (`0` = sans limite). |
 | Session Telegram invalide (PC) | Supprime les fichiers `client.session*` et relance `npm start`. |
-| `🔑 Session Telegram à refaire` (téléphone) | App → **Connexion Telegram** → **Se reconnecter**. |
+| `🔑 Session Telegram à refaire` (téléphone) | App → **📡 Sources** → **✈️ Telegram** → **🔄 Se reconnecter**. |
 | `🔕 Alerte non envoyée : … envoie /start …` | Envoie `/start` à ton bot d'alertes. |
 | `🔕 Alerte non envoyée : … vérifie ALERT_BOT_TOKEN` | Jeton faux ou révoqué : recopie-le depuis @BotFather. |
 | `🔕 Alertes : destinataire inconnu` | Normal avant la première connexion Telegram. Sinon, remplis `ALERT_CHAT_ID`. |

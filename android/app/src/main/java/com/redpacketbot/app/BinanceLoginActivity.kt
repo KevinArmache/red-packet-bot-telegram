@@ -1,23 +1,38 @@
 package com.redpacketbot.app
 
-import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.Gravity
-import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.redpacketbot.app.ui.theme.AppColors
+import com.redpacketbot.app.ui.theme.RedPacketTheme
 
 /**
  * Connexion Binance, en plein écran, avec le clavier du téléphone.
@@ -28,10 +43,15 @@ import androidx.core.view.WindowInsetsCompat
  */
 class BinanceLoginActivity : ComponentActivity() {
     private lateinit var webView: WebView
-    private lateinit var status: TextView
     private val handler = Handler(Looper.getMainLooper())
     private var done = false
     private var appPageSeen = 0
+    private val status = mutableStateOf(
+        "🔑 Connecte-toi à Binance (e-mail ou téléphone, mot de passe, code 2FA). " +
+            "Pince pour zoomer. L'écran se ferme tout seul une fois connecté.",
+    )
+    private val connected = mutableStateOf(false)
+    private val progress = mutableIntStateOf(0)
 
     private val checkTask = object : Runnable {
         override fun run() {
@@ -41,27 +61,10 @@ class BinanceLoginActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        status = TextView(this).apply {
-            text = "🔑 Connecte-toi à Binance (e-mail ou téléphone, mot de passe, code 2FA). " +
-                "Pince pour zoomer. L'écran se ferme tout seul une fois connecté."
-            setTextColor(Color.WHITE)
-            textSize = 14f
-            setPadding(24, 16, 24, 16)
-        }
-        val close = Button(this).apply {
-            text = "Fermer"
-            setOnClickListener { finish() }
-        }
-        val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#B71C1C"))
-            addView(status, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(close)
-        }
-
+        // Créée une seule fois (rotation et thème gérés par configChanges dans le manifeste)
         webView = WebView(this)
         WebViewSetup.configure(webView, this)
         webView.webViewClient = object : WebViewClient() {
@@ -75,21 +78,44 @@ class BinanceLoginActivity : ComponentActivity() {
                 return true
             }
         }
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onProgressChanged(view: WebView, newProgress: Int) {
+                progress.intValue = newProgress
+            }
+        }
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#B71C1C"))
-            addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        setContent {
+            RedPacketTheme {
+                Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
+                    // Android 15 dessine sous les barres système : on laisse la place aux
+                    // barres et au clavier (sinon il cacherait les champs de connexion)
+                    Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
+                        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    status.value,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (connected.value) AppColors.success else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = { finish() }) { Text("✖️ Fermer") }
+                            }
+                        }
+                        if (progress.intValue in 1..99) {
+                            LinearProgressIndicator(
+                                progress = { progress.intValue / 100f },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = AppColors.gold,
+                            )
+                        }
+                        AndroidView(factory = { webView }, modifier = Modifier.fillMaxWidth().weight(1f))
+                    }
+                }
+            }
         }
-        // Android 15 dessine sous les barres système : on laisse la place aux
-        // barres et au clavier (sinon il cacherait les champs de connexion)
-        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-            WindowInsetsCompat.CONSUMED
-        }
-        setContentView(root)
 
         // Retour : page précédente de Binance, sinon fermeture de l'écran
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -131,7 +157,8 @@ class BinanceLoginActivity : ComponentActivity() {
         done = true
         CookieManager.getInstance().flush()
         BotService.instance?.onBinanceLoginDone()
-        status.text = "✅ Connecté à Binance — le bot reprend la main."
+        status.value = "✅ Connecté à Binance — le bot reprend la main."
+        connected.value = true
         Toast.makeText(this, "✅ Connecté à Binance", Toast.LENGTH_LONG).show()
         handler.postDelayed({ finish() }, 1500)
     }

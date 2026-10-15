@@ -5,8 +5,55 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Couleur d'un état à l'écran. */
+enum class Tone { OK, INFO, BUSY, IDLE, WARN, DANGER }
+
+/**
+ * État du bot structuré, pour l'écran d'accueil (bouton d'état animé).
+ * @property phase active, standby, checking, starting, restarting, stopped, config,
+ *   telegram_login, telegram_required, binance_login, paused ou halted
+ */
+data class BotStatus(
+    val phase: String,
+    val tone: Tone,
+    val emoji: String,
+    val title: String,
+    val detail: String,
+)
+
 /** Texte de l'état du bot, pour la notification et l'écran d'accueil. */
 object Status {
+
+    /** Même texte que [describe], découpé et classé pour l'écran d'accueil. */
+    fun model(state: JSONObject, heartbeat: Heartbeat?, nodeRunning: Boolean = true): BotStatus {
+        val (full, detail) = describe(state, heartbeat, nodeRunning)
+        val phase = when (state.optString("status", BotState.STOPPED)) {
+            BotState.STOPPED -> "stopped"
+            BotState.CONFIG_MISSING -> "config"
+            BotState.STARTING -> "starting"
+            BotState.RESTARTING -> "restarting"
+            BotState.TELEGRAM_LOGIN -> "telegram_login"
+            BotState.TELEGRAM_REQUIRED -> "telegram_required"
+            else -> when {
+                !nodeRunning || heartbeat == null -> "starting"
+                heartbeat.browser == "login" -> "binance_login"
+                heartbeat.pauseUntil > System.currentTimeMillis() -> "paused"
+                heartbeat.antiban == "halt" -> "halted"
+                heartbeat.mode == "standby" -> "standby"
+                heartbeat.mode == "checking" -> "checking"
+                else -> "active"
+            }
+        }
+        val tone = when (phase) {
+            "active" -> Tone.OK
+            "standby", "checking" -> Tone.INFO
+            "starting", "restarting", "telegram_login" -> Tone.BUSY
+            "stopped" -> Tone.IDLE
+            "config" -> Tone.WARN
+            else -> Tone.DANGER
+        }
+        return BotStatus(phase, tone, full.substringBefore(' '), full.substringAfter(' '), detail)
+    }
 
     fun describe(state: JSONObject, heartbeat: Heartbeat?, nodeRunning: Boolean = true): Pair<String, String> {
         val message = state.optString("message")
@@ -41,7 +88,9 @@ object Status {
         when (heartbeat.antiban) {
             "halt" -> parts += "${heartbeat.fails} faux d'affilée : envoie #reprendre sur Telegram"
             "selective" -> parts += "🟠 codes clairs seulement (${heartbeat.fails} faux d'affilée)"
+            else -> parts += "🛡️ anti-ban ${heartbeat.fails}/10"
         }
+        if (heartbeat.xOn) parts += if (heartbeat.xDryRun) "🐦 X (essai à blanc)" else "🐦 X actif"
         return title to parts.joinToString(" · ")
     }
 

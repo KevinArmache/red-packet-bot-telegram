@@ -1,0 +1,166 @@
+package com.redpacketbot.app.ui
+
+import android.app.Application
+import android.content.Context
+import android.content.Intent
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.redpacketbot.app.ActivityLog
+import com.redpacketbot.app.AppFiles
+import com.redpacketbot.app.BotConfig
+import com.redpacketbot.app.BotService
+import com.redpacketbot.app.BotState
+import com.redpacketbot.app.Health
+import com.redpacketbot.app.Heartbeat
+import com.redpacketbot.app.XListenerState
+import com.redpacketbot.app.XNotificationListener
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
+import org.json.JSONObject
+
+/** Ce que l'interface sait du bot (relu toutes les secondes). */
+data class Snapshot(
+    val state: JSONObject,
+    val heartbeat: Heartbeat?,
+    val config: BotConfig,
+    val hasTelegramSession: Boolean,
+    val userStopped: Boolean,
+    val activity: ActivityLog,
+    val xListener: XListenerState,
+    val xAccess: Boolean,
+) {
+    val status: String get() = state.optString("status", BotState.STOPPED)
+
+    /**
+     * Le bot tourne (ou démarre) dans le processus « :bot ». Un état « en
+     * marche » sans signe de vie depuis 5 min veut dire que le processus a
+     * été tué : l'écran propose alors de le démarrer.
+     */
+    val isRunning: Boolean
+        get() {
+            if (userStopped) return false
+            return when (status) {
+                BotState.STARTING, BotState.TELEGRAM_LOGIN -> true
+                BotState.RUNNING -> {
+                    val since = maxOf(state.optLong("statusSince", 0L), heartbeat?.writtenAt ?: 0L)
+                    System.currentTimeMillis() - since < 5 * 60_000L
+                }
+                else -> false
+            }
+        }
+
+    /** Signe de vie du bot en marche (null s'il est arrêté : chiffres périmés). */
+    val liveHeartbeat: Heartbeat? get() = heartbeat?.takeIf { isRunning }
+
+    /** Arrêter / redémarrer a un sens (bot en marche ou en attente de relance). */
+    val canStop: Boolean
+        get() = isRunning || status == BotState.RESTARTING || status == BotState.TELEGRAM_REQUIRED
+
+    val prompt: JSONObject? get() = state.optJSONObject("prompt")
+
+    val telegramOk: Boolean get() = hasTelegramSession && status != BotState.TELEGRAM_REQUIRED
+}
+
+/** Réglages du téléphone vérifiés pour l'écran Santé (et le score de l'accueil). */
+data class HealthReport(val items: List<Health.Item> = emptyList(), val manual: Map<String, Boolean> = emptyMap()) {
+    fun isDone(item: Health.Item): Boolean? = item.ok ?: if (manual[item.key] == true) true else null
+    val okCount: Int get() = items.count { isDone(it) == true }
+    val total: Int get() = items.size
+    val criticalMissing: Int get() = items.count { it.critical && it.ok == false }
+}
+
+class BotViewModel(app: Application) : AndroidViewModel(app) {
+    private val files = AppFiles(app)
+    private val healthPrefs = app.getSharedPreferences("health", Context.MODE_PRIVATE)
+    private val uiPrefs = app.getSharedPreferences("ui", Context.MODE_PRIVATE)
+    @Volatile private var lastActivity: ActivityLog? = null
+
+    val snapshot: StateFlow<Snapshot> = flow {
+        while (true) {
+            emit(load())
+            delay(1000)
+        }
+    }.flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), load())
+
+    private val healthTrigger = MutableStateFlow(0)
+
+    /** Revérifié toutes les 10 s, et tout de suite au retour dans l'app ([refreshHealth]). */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val health: StateFlow<HealthReport> = healthTrigger.flatMapLatest {
+        flow {
+            while (true) {
+                emit(checkHealth())
+                delay(10_000)
+            }
+        }
+    }.flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), HealthReport())
+
+    private fun load(): Snapshot {
+        val activity = ActivityLog.read(files.activity, lastActivity).also { lastActivity = it }
+        return Snapshot(
+            state = BotState.read(files),
+            heartbeat = Heartbeat.read(files.heartbeat),
+            config = BotConfig.load(files.config),
+            hasTelegramSession = files.telegramSession.exists(),
+            userStopped = files.userStopped.exists(),
+            activity = activity,
+            xListener = XListenerState.read(files.xListener),
+            xAccess = XNotificationListener.isAccessGranted(getApplication()),
+        )
+    }
+
+    private fun checkHealth(): HealthReport {
+        val items = Health.check(getApplication())
+        return HealthReport(items, items.associate { it.key to healthPrefs.getBoolean(it.key, false) })
+    }
+
+    fun refreshHealth() {
+        healthTrigger.value++
+    }
+
+    /** Point à vérifier à la main (Tecno) : coché par toi. */
+    fun setManualDone(key: String, done: Boolean) {
+        healthPrefs.edit().putBoolean(key, done).apply()
+        refreshHealth()
+    }
+
+    // ─── Assistant de démarrage ────────────────────────────────────────────
+
+    var wizardDone: Boolean
+        get() = uiPrefs.getBoolean("wizardDone", false)
+        set(value) = uiPrefs.edit().putBoolean("wizardDone", value).apply()
+
+    // ─── Commandes du bot (mêmes actions qu'avant la refonte) ─────────────
+
+    fun start() = send(BotService.ACTION_START)
+    fun stop() = send(BotService.ACTION_STOP)
+    fun restart() = send(BotService.ACTION_RESTART)
+    fun testAlert() = send(BotService.ACTION_TEST_ALERT)
+    fun telegramLogin() = send(BotService.ACTION_TELEGRAM_LOGIN)
+
+    fun answerPrompt(id: Int, value: String) = send(BotService.ACTION_PROMPT_ANSWER) {
+        putExtra(BotService.EXTRA_PROMPT_ID, id)
+        putExtra(BotService.EXTRA_VALUE, value)
+    }
+
+    /** Enregistre les réglages ; le bot redémarre s'il tourne. @return true s'il redémarre. */
+    fun saveConfig(config: BotConfig): Boolean {
+        config.save(files.config)
+        val running = snapshot.value.isRunning
+        if (running) restart()
+        return running
+    }
+
+    fun loadConfig(): BotConfig = BotConfig.load(files.config)
+
+    private fun send(action: String, extras: Intent.() -> Unit = {}) =
+        BotService.send(getApplication(), action, extras)
+}

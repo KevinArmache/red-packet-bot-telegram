@@ -22,10 +22,14 @@ class AppFiles(context: Context) {
     val telegramLoginRequest = File(runDir, "telegram-login")
     /** Configuration passée à Node.js au démarrage. */
     val nodeConfig = File(runDir, "node-config.json")
+    /** État de la lecture des notifications X (XNotificationListener). */
+    val xListener = File(runDir, "x-listener.json")
 
     /** Dossier de données du bot (BOT_DATA_DIR) : historique, session, alertes. */
     val botData = File(root, "bot-data").apply { mkdirs() }
     val heartbeat = File(botData, ".run/heartbeat")
+    /** Derniers codes, gains, graphique 24 h, stats par source (src/activity.js). */
+    val activity = File(botData, ".run/activity.json")
     val nodeExit = File(botData, ".run/node-exit.json")
     val logFile = File(botData, "logs/bot.log")
     val telegramSession = File(botData, "telegram-session.txt")
