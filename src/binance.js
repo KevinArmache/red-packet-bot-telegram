@@ -858,12 +858,51 @@ function waitGiftResponse(page, pathPart, code, timeout) {
 function giftRefusal(body) {
   if (!body || typeof body !== 'object') return null;
   if (body.code === '000000' && body.success !== false && body.data?.success !== false) return null;
+  // messageDetail est parfois un OBJET (« [object Object] » dans les logs
+  // d'octobre 2026) : son texte compte, il dit s'il reste des essais
+  if (body.messageDetail && typeof body.messageDetail === 'object') {
+    logger.debug(`📭 Réponse Binance : ${JSON.stringify(body).substring(0, 400)}`);
+  }
   return {
-    text: String(body.messageDetail || body.message || `erreur Binance ${body.code ?? 'inconnue'}`),
+    text:
+      (typeof body.messageDetail === 'string' && body.messageDetail.trim()) ||
+      textOf(body.message) ||
+      textOf(body.messageDetail) ||
+      `erreur Binance ${body.code ?? 'inconnue'}`,
     apiCode: body.code !== undefined && body.code !== null ? String(body.code) : '',
     captcha: Boolean(body.data && typeof body.data === 'object' && 'validateId' in body.data),
   };
 }
+
+/**
+ * Texte lisible d'un champ de message Binance : chaîne telle quelle ; objet
+ * → ses champs texte connus, sinon toutes ses chaînes, sinon son JSON (les
+ * motifs de lecture des refus s'appliquent encore).
+ */
+function textOf(value, depth = 0) {
+  if (typeof value === 'string') return value.trim();
+  if (!value || typeof value !== 'object' || depth > 2) return '';
+  for (const key of ['message', 'msg', 'detail', 'text', 'messageDetail', 'fr', 'en']) {
+    const found = textOf(value[key], depth + 1);
+    if (found) return found;
+  }
+  const strings = Object.values(value).filter((v) => typeof v === 'string' && v.trim());
+  if (strings.length) return strings.join(' · ');
+  try {
+    return JSON.stringify(value).substring(0, 200);
+  } catch (_) {
+    return '';
+  }
+}
+
+/** Refus sans texte utilisable : ce que veut dire le code d'erreur de Binance. */
+const REFUSAL_LABELS = {
+  exhausted: 'Red Packet entièrement réclamé ou expiré',
+  grabbed: 'déjà réclamé par ce compte',
+  invalid: 'code invalide',
+  locked: 'trop de tentatives (blocage)',
+  session: 'session expirée',
+};
 
 // ─── Lecture des refus de Binance ───────────────────────────────────────────
 //
@@ -1089,7 +1128,13 @@ function claimFailure(code, refusal) {
   const remaining = parseRemaining(text);
   const reason = classifyRefusal(refusal, remaining);
   const left = remaining !== null ? ` · ${remaining} essai(s) restant(s)` : '';
-  logger.warn(`📭 Code ${code} — ${apiCode ? `[${apiCode}] ` : ''}${text.substring(0, 160)}${left}`);
+  // Texte de secours quand Binance n'en donne pas de lisible
+  const shown = /^erreur Binance /.test(text) && REFUSAL_LABELS[reason] ? REFUSAL_LABELS[reason] : text.substring(0, 160);
+  const line = `📭 Code ${code} — ${apiCode ? `[${apiCode}] ` : ''}${shown}${left}`;
+  // Épuisé ou déjà pris : issue normale (le compteur anti-blocage n'avance
+  // pas) ; code faux ou refus inconnu : à surveiller
+  if (reason === 'exhausted' || reason === 'grabbed') logger.info(line);
+  else logger.warn(line);
 
   const details = { reason, apiCode, remaining, submitted: true };
 
@@ -1357,6 +1402,7 @@ module.exports = {
   isLoginPage,
   isOnCryptobox,
   classifyRefusal,
+  giftRefusal,
   parseRemaining,
   parseLockMs,
   _resetPauseForTests: () => { pauseUntil = 0; },

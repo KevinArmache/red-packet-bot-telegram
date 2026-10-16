@@ -219,6 +219,7 @@ Dernier signal : 21:31:16
 - PC **🟠 indisponible** (connexion Binance à refaire, navigateur en cours de lancement ou de relance) → le téléphone **prend le relais**.
 - PC **⏹️ arrêté** (`Ctrl+C`) → le téléphone prend le relais **tout de suite** (il réclame dès que son Chromium est prêt).
 - PC **muet depuis plus de 150 s** (éteint, planté, sans Internet) → le téléphone prend le relais, environ 2 min 30 après.
+- PC **arrêté, jamais vu, ou muet depuis 10 min** → mode « PC absent » : le téléphone ne lui laisse plus aucun code. Il garde la main pendant une coupure de son message de relais (réseau, FLOOD_WAIT), et réclame aussi les codes encore frais livrés à une reconnexion. Dès que le PC publie « actif », les règles normales reviennent.
 
 Dès que le PC redevient actif, le téléphone repasse en veille.
 

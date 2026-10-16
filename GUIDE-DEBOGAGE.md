@@ -535,6 +535,29 @@ adb shell cmd notification allow_listener com.redpacketbot.app/com.redpacketbot.
 - Un post X dont les codes sont déjà traités l'écrit maintenant dans les logs (« 🐦 Post X de … : code(s) déjà traité(s) plus tôt ») et dans **📡 Sources → 🐦 X**.
 - **🔍 Rechercher un code** (📜 Activité → 🎁 Codes) dit tout de suite si un code a été vu, sur quel canal, et ce qu'il est devenu, ou « jamais vu » avec les causes possibles.
 
+### Résolu : « je reçois moins de Red Packets » et les WARN des logs (16 octobre 2026)
+
+**Le diagnostic** (logs du 14/10 00:30 au 16/10 02:08, lus avec `dumpsys -t 90 … logs 5000` : sans `-t`, dumpsys coupe la sortie au bout de 10 s) :
+
+- **Pas de baisse** : de 13 h à 23 h, 70 codes détectés le 14/10 contre 169 le 15/10 après la mise à jour.
+- **P0G7XJ4J (t.me/bybitcryptoboxcode)** : canal absent de la liste, le bot n'en reçoit rien.
+- **Trou du 15/10, 03:59 → 09:42** : Internet coupé (Telegram déconnecté). AI Net était déjà à 0 et la batterie sans restriction : la coupure ne venait pas du téléphone.
+- **Le relais a coûté 10 codes** et a fait arrêter le téléphone 7 fois, alors que le PC n'a jamais été vu actif :
+  - 8 codes livrés à une reconnexion avaient été « laissés au PC » ;
+  - le téléphone cessait de réclamer quand son message de relais ne passait plus (réseau, FLOOD_WAIT_294).
+- **7 codes « Navigateur non prêt »**, tous dans les secondes qui suivent un redémarrage du bot.
+- **`📭 … [object Object]`** (23 fois) : `messageDetail` de Binance est parfois un objet. Grave : pour un code générique (`PAY4001COM000`), c'est ce texte qui révèle un vrai blocage (« 0 tentative »).
+
+**La solution.**
+
+- Mode « **PC absent** » du relais (PC arrêté, jamais vu, ou muet depuis 10 min) : le téléphone réclame tout et ne lâche plus la main.
+- Un code qui arrive pendant l'ouverture de la page Binance l'attend (30 s au plus) au lieu d'être abandonné.
+- Texte des refus lu dans le champ `message` ou dans l'objet `messageDetail` ; secours lisible par code d'erreur.
+- Ouverture de la WebView ratée : nouvel essai après 5 s puis 15 s (au lieu de 60 s).
+- WARN réservés aux vrais problèmes :
+  - repassés en INFO : attente normale dans la file (moins de 30 s), FLOOD_WAIT de l'indexation des canaux (repli qui marche), arrêt propre, refus « épuisé » ou « déjà pris » ;
+  - canaux introuvables : la cause et quoi faire (« n'existe pas », « compte personnel », « canal privé »).
+
 ### Le format réel des notifications de X (relevé du 15 octobre 2026, X 12.33)
 
 - Canal `<id de ton compte>-tweet_notifications_silent`. Un résumé de groupe (`GROUP_SUMMARY`, sans texte) accompagne les posts : il est ignoré.

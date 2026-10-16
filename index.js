@@ -411,8 +411,14 @@ async function ensureBrowser() {
       }
       failures++;
       if (failures >= 3) throw err;
-      logger.warn(`🌐 Lancement du navigateur échoué (${err.message}) — nouvel essai dans 60 s`);
-      await sleep(60_000);
+      // Téléphone : la WebView est souvent prête quelques secondes plus tard
+      // (juste après une mise à jour de l'app) — on n'attend pas une minute
+      const retryMs = ANDROID_APP ? (failures === 1 ? 5_000 : 15_000) : 60_000;
+      logger.warn(
+        `🌐 Lancement du navigateur échoué (${String(err.message).split("\n")[0]}) — ` +
+          `nouvel essai dans ${retryMs / 1000} s`,
+      );
+      await sleep(retryMs);
     }
   }
 }
@@ -531,6 +537,24 @@ function leaveToOtherDevice(code, postedAt, meta = {}) {
   logger.info(`🤝 Code ${code} non réclamé ici — ${relay.whyNotClaiming(postedAt)}`);
 }
 
+const BROWSER_WAIT_MS = 30_000;
+
+/**
+ * Page Binance pas encore prête alors qu'elle doit tourner (ouverture en
+ * cours) : attente de 30 s au plus. Session à reconnecter, pause ou appareil
+ * en veille : pas d'attente (claimCode dira pourquoi).
+ */
+async function waitBrowserReady(code) {
+  const pending = () => {
+    const s = binance.getStatus();
+    return !s.ready && !s.awaitingLogin && relay.shouldRunBrowser() && !shuttingDown;
+  };
+  if (!pending()) return;
+  logger.info(`⏳ Code ${code} — page Binance en cours d'ouverture, il l'attend (30 s max)`);
+  const deadline = Date.now() + BROWSER_WAIT_MS;
+  while (pending() && Date.now() < deadline) await sleep(500);
+}
+
 /** Issue d'une réclamation → statut du journal d'activité de l'app. */
 const ACTIVITY_STATUS = {
   success: "won",
@@ -585,11 +609,19 @@ function handleDetectedCode(code, meta = {}) {
       return;
     }
 
+    // Page Binance en cours d'ouverture (redémarrage, reprise du relais) : le
+    // code l'attend au lieu d'être abandonné (« Navigateur non prêt »)
+    await waitBrowserReady(code);
+
     const waitedMs = Date.now() - detectedAt;
     stats.recordQueueWait(waitedMs);
 
-    if (waitedMs > 1000) {
-      logger.warn(`⏱️ Code ${code} — ${waitedMs} ms d'attente avant traitement`);
+    // Plusieurs codes à la fois : chacun attend son tour (une seule page
+    // Binance). Normal ; alarmant seulement au-delà de 30 s.
+    if (waitedMs > 30_000) {
+      logger.warn(`⏱️ Code ${code} — ${Math.round(waitedMs / 1000)} s d'attente avant traitement (file chargée)`);
+    } else if (waitedMs > 1000) {
+      logger.info(`⏱️ Code ${code} — ${(waitedMs / 1000).toFixed(1)} s d'attente dans la file`);
     }
 
     // Anti-blocage : décidé juste avant la saisie, avec le compteur à jour
@@ -762,7 +794,7 @@ function setupGlobalErrorHandlers() {
     shuttingDown = true;
 
     logger.blank();
-    logger.warn(`🛑 Signal ${signal} — arrêt propre...`);
+    logger.info(`🛑 Signal ${signal} — arrêt propre...`);
 
     // Publie « arrêté » → l'autre appareil reprend la main immédiatement
     await relay.shutdown().catch(() => {});

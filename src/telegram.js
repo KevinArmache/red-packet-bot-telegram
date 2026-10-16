@@ -125,6 +125,21 @@ async function withFloodRetry(fn, label, maxAttempts = 2) {
 }
 
 /** Nettoie une entrée TARGET_CHANNELS (@nom, lien t.me, ID brut). */
+/** Pourquoi un canal de la liste est introuvable, et quoi faire. */
+function explainResolveError(err) {
+  const msg = String(err?.message ?? err);
+  if (/was not found|USERNAME_NOT_OCCUPIED|USERNAME_INVALID|No user has/i.test(msg)) {
+    return "ce @pseudo n'existe pas (canal supprimé ou renommé) : corrige-le ou retire-le";
+  }
+  if (/not a chat or channel/i.test(msg)) {
+    return "c'est un compte personnel, pas un canal : retire-le de la liste";
+  }
+  if (/CHANNEL_PRIVATE|CHAT_FORBIDDEN|private/i.test(msg)) {
+    return "canal privé ou compte exclu : rejoins-le d'abord avec ce compte Telegram";
+  }
+  return `${msg} — il sera capté à son premier message si le compte y est abonné`;
+}
+
 function normalizeTarget(raw) {
   return String(raw)
     .trim()
@@ -879,8 +894,13 @@ async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
     }
     logger.success(`🗂️  ${dialogCount} dialogue(s) indexé(s)`);
   } catch (err) {
-    logger.warn(
-      `⚠️  Indexation des dialogues impossible (${err.message}) — repli sur getChat()`,
+    // Le plus souvent FLOOD_WAIT après des redémarrages rapprochés : le repli
+    // canal par canal fonctionne, ce n'est pas une panne
+    const wait = /FLOOD_WAIT_(\d+)/.exec(err.message ?? "");
+    logger.info(
+      wait
+        ? `🗂️  Indexation des dialogues freinée par Telegram (attente ${wait[1]} s) — résolution canal par canal`
+        : `🗂️  Indexation des dialogues impossible (${err.message}) — résolution canal par canal`,
     );
   }
 
@@ -926,7 +946,7 @@ async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
             channelMap.set(key, target);
             resolved.push(`${target} (ID brut)`);
           } else {
-            failed.push(`${target} — ${err.message}`);
+            failed.push(`${target} — ${explainResolveError(err)}`);
           }
         }
       },
@@ -957,12 +977,8 @@ async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
   );
 
   if (failed.length > 0) {
-    logger.warn(`🚧 ${failed.length} canal(aux) non résolu(s) :`);
+    logger.warn(`🚧 ${failed.length} canal(aux) de ta liste introuvable(s) — à corriger dans tes réglages :`);
     logger.list(failed, 1, logger.colors.yellow);
-    logger.warn(
-      "    Ils seront captés automatiquement dès leur premier message si le\n" +
-        "    compte est abonné (rattrapage à la volée par @username).",
-    );
   }
 
   // ── Étape 3 (arrière-plan) — groupes de discussion liés ──────────────────

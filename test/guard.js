@@ -121,6 +121,20 @@ async function main() {
   check("inconnu → other", classifyRefusal({ text: "Quelque chose d'inattendu" }), "other");
 
   // ─── Mode stop ────────────────────────────────────────────────────────────
+  // Réponses d'octobre 2026 : messageDetail est un objet (« [object Object] »)
+  {
+    const { giftRefusal } = binance;
+    const exhausted = giftRefusal({ code: "403802", message: "Red packet has been fully claimed", messageDetail: { foo: 1 } });
+    check("détail objet : le message texte est gardé", exhausted.text, "Red packet has been fully claimed");
+    check("403802 + détail objet : épuisé", classifyRefusal(exhausted), "exhausted");
+    const lockInDetail = giftRefusal({ code: "PAY4001COM000", messageDetail: { message: "Il vous reste 0 tentative" } });
+    check("blocage écrit dans un détail objet : lu", lockInDetail.text, "Il vous reste 0 tentative");
+    check("code générique + 0 essai dans le détail objet : blocage", classifyRefusal(lockInDetail), "locked");
+    const noText = giftRefusal({ code: "403803", messageDetail: { remainingTimes: 7 } });
+    check("détail objet sans texte : jamais « [object Object] »", noText.text.includes("[object Object]"), false);
+    check("403803 : code faux", classifyRefusal(noText), "invalid");
+  }
+
   section("Mode stop (codes clairs à 8, arrêt à 9)");
   {
     const { antiban, events, dataDir, fails, invalid } = freshAntiban();
@@ -472,6 +486,37 @@ async function main() {
     check("solo : réclamé ici", x.routeFor({ role: "solo", canClaimNow: false }), "local");
     check("téléphone responsable : réclamé ici", x.routeFor({ role: "backup", canClaimNow: true }), "local");
     check("téléphone en veille : transmis au PC", x.routeFor({ role: "backup", canClaimNow: false }), "forward");
+  }
+
+  // ─── Relais : téléphone seul quand le PC est absent ───────────────────────
+  section("Relais : PC absent, le téléphone ne lui laisse plus rien");
+  {
+    const savedRole = process.env.BOT_ROLE;
+    process.env.BOT_ROLE = "backup";
+    delete require.cache[require.resolve("../src/relay")];
+    const relay = require("../src/relay");
+    let nextId = 1;
+    const sent = (text) => ({ id: nextId++, date: new Date(), editDate: null, text });
+    const fakeTelegram = {
+      searchMessages: async () => [], // aucun message #botrelay du PC
+      sendText: async (_chat, text) => sent(text),
+      editMessage: async ({ text }) => sent(text),
+      deleteMessagesById: async () => {},
+    };
+    await relay.start(fakeTelegram, { getLocalState: () => ({ ready: true, awaitingLogin: false, pauseUntil: 0 }) });
+    await sleep(100); // prise de relais (relecture puis « actif »)
+    check("PC jamais vu : code livré à la reconnexion (publié avant la reprise) réclamé", relay.canClaim(Date.now() - 60_000), true);
+    check("mode affiché", relay.describeMode(), "📱 actif (PC absent : réclame tout)");
+    relay.handleSelfMessage(sent("#botrelay role=primary state=active pause=0 inst=aaaaaaaa since=0"));
+    await sleep(50);
+    check("PC de retour et actif : le téléphone lui laisse la main", relay.canClaim(Date.now()), false);
+    relay.handleSelfMessage(sent("#botrelay role=primary state=stopped pause=0 inst=aaaaaaaa since=0"));
+    await sleep(100);
+    check("PC arrêté (Ctrl+C) : le téléphone reprend tout", relay.canClaim(Date.now() - 60_000), true);
+    await relay.shutdown();
+    delete require.cache[require.resolve("../src/relay")];
+    if (savedRole === undefined) delete process.env.BOT_ROLE;
+    else process.env.BOT_ROLE = savedRole;
   }
 
   // ─── Journal d'activité de l'app : montants gagnés ────────────────────────

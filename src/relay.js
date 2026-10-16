@@ -46,6 +46,10 @@ const INSTANCE = crypto.randomBytes(4).toString("hex");
 
 const HEARTBEAT_MS = 60_000; // publication de l'état
 const PEER_TIMEOUT_MS = 150_000; // l'autre appareil est jugé absent après ce silence
+// Téléphone : PC arrêté, jamais vu, ou muet depuis 10 min → il ne lui laisse
+// plus aucun code (ni ceux livrés à une reconnexion, ni pendant une coupure
+// du relais). Les règles normales reviennent dès que le PC publie « actif ».
+const PC_GONE_MS = 10 * 60_000;
 const SAFE_SILENCE_MS = 120_000; // sans publication réussie depuis 2 min, on cesse de réclamer
 const SHORT_BLIP_MS = 60_000; // coupure assez courte pour garder la responsabilité
 const ACK_TIMEOUT_MS = 20_000; // le PC attend au plus 20 s la mise en veille du téléphone
@@ -165,7 +169,10 @@ function parseStatus(text) {
  */
 function canClaim(postedAt) {
   if (ROLE === "solo") return true;
-  if (!owner || stopping || resyncing || !selfHealthy()) return false;
+  if (stopping) return false;
+  // Téléphone actif et PC absent : personne d'autre ne réclame, il prend tout
+  if (ROLE === "backup" && mode === "active" && connected && pcGone()) return true;
+  if (!owner || resyncing || !selfHealthy()) return false;
   const stamp = Number.isFinite(postedAt) ? postedAt : serverNow();
   return stamp >= ownerSince;
 }
@@ -186,6 +193,16 @@ function whyNotClaiming(postedAt) {
     return "publié avant la prise de relais — l'autre appareil en était responsable";
   }
   return "relais";
+}
+
+/**
+ * Téléphone : le PC est-il absent ? (arrêté, jamais vu, ou muet depuis 10 min)
+ * Alors aucune double réclamation n'est possible : le téléphone réclame tout.
+ */
+function pcGone() {
+  if (ROLE !== "backup" || !peer.known) return false;
+  if (peer.state === "stopped") return true;
+  return !peer.at || Date.now() - peer.at > PC_GONE_MS;
 }
 
 /**
@@ -227,6 +244,7 @@ function describeMode() {
     if (handoverStartedAt) return "🤝 passage de relais en cours";
     return describeState(ownState());
   }
+  if (mode === "active" && pcGone()) return "📱 actif (PC absent : réclame tout)";
   if (mode === "active") return owner ? "📱 actif (réclame les codes)" : "📱 prise de relais en cours";
   if (mode === "standby") return "😴 en veille (le PC réclame)";
   return "🔎 vérification du PC";
@@ -329,7 +347,9 @@ async function resync(offlineMs) {
       (peer.state === "active" || (ROLE === "backup" && peer.state === "pause"));
     // Coupure courte, autre appareil inactif : il n'a pas pu reprendre la main
     // (il lui faut 2 min 30 de silence), la responsabilité reste continue.
-    if (offlineMs >= SHORT_BLIP_MS || peerBusy || !found) {
+    // Téléphone avec PC absent : la responsabilité reste aussi la sienne.
+    const keep = ROLE === "backup" && pcGone() && !peerBusy;
+    if (!keep && (offlineMs >= SHORT_BLIP_MS || peerBusy || !found)) {
       loseOwnership(`reconnexion à Telegram après ${stats.formatDuration(offlineMs)}`);
     }
     // Téléphone : veille AVANT de republier, pour ne jamais annoncer « actif »
@@ -731,6 +751,24 @@ function evaluatePrimary() {
 
 // ── Téléphone (backup) ──
 
+let lastPcGone = null;
+
+/** Annonce (une fois) l'entrée et la sortie du mode « PC absent ». */
+function notePcGone() {
+  const gone = pcGone();
+  if (gone === lastPcGone) return;
+  const first = lastPcGone === null;
+  lastPcGone = gone;
+  if (gone) {
+    logger.info(
+      "🤝 Relais : PC absent" + (peer.at ? " depuis plus de 10 min" : "") +
+        " — le téléphone réclame tous les codes, même pendant une coupure du relais",
+    );
+  } else if (!first) {
+    logger.info("🤝 Relais : PC de retour — règles normales du relais (le PC a la priorité)");
+  }
+}
+
 function backupDecision() {
   const silentFor = peer.at ? Date.now() - peer.at : Infinity;
   const fresh = peerFresh();
@@ -754,10 +792,12 @@ function backupDecision() {
 }
 
 function evaluateBackup() {
-  // Notre propre connexion est coupée : impossible de juger le PC. On ne
-  // réclame pas (canClaim) et le mode reste figé jusqu'à la reconnexion.
+  notePcGone();
+  // Notre état n'est plus publié (réseau, FLOOD_WAIT) : le PC pourrait nous
+  // croire absents et reprendre la main, on cesse donc de réclamer… sauf si
+  // le PC est lui-même absent (canClaim) : personne ne réclamerait.
   if (!publishFresh()) {
-    if (owner) loseOwnership("état du relais non publié depuis 2 min (réseau)");
+    if (owner && !pcGone()) loseOwnership("état du relais non publié depuis 2 min (réseau)");
     return;
   }
   if (!connected || resyncing) return;
