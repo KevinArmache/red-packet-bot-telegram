@@ -36,6 +36,8 @@ class XNotificationListener : NotificationListenerService() {
         private const val TAG = "RedPacketBot"
         private const val DEDUP_MS = 15 * 60_000L
         private const val DEDUP_MAX = 300
+        /** Vérification « le bot tourne-t-il ? » au plus toutes les 5 min (voir checkBot). */
+        private const val BOT_CHECK_MS = 5 * 60_000L
 
         fun component(context: Context) = ComponentName(context, XNotificationListener::class.java)
 
@@ -75,6 +77,7 @@ class XNotificationListener : NotificationListenerService() {
     private var lastPostAt = 0L
     private var lastFrom = ""
     private var lastExcerpt = ""
+    private var lastBotCheck = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -85,6 +88,22 @@ class XNotificationListener : NotificationListenerService() {
         connected = true
         connectedAt = System.currentTimeMillis()
         writeStatus()
+        checkBot()
+    }
+
+    /**
+     * Android relance lui-même cet écouteur (donc le processus « :bot ») après une
+     * mise à jour de l'app ou un arrêt forcé par le système. Or HiOS bloque souvent
+     * l'annonce de mise à jour et retient le gardien (WorkManager) d'une app gelée :
+     * c'est alors l'écouteur qui relance le bot, sinon HiOS gèlerait l'app 5 s plus
+     * tard, bot arrêté, jusqu'à ce que tu l'ouvres. Sans effet si le bot tourne,
+     * si tu l'as arrêté ou si une relance est déjà programmée (ensureBotRunning).
+     */
+    private fun checkBot() {
+        val now = System.currentTimeMillis()
+        if (BotService.instance != null || now - lastBotCheck < BOT_CHECK_MS) return
+        lastBotCheck = now
+        ensureBotRunning(this, "écouteur de notifications")
     }
 
     override fun onListenerDisconnected() {
@@ -99,6 +118,7 @@ class XNotificationListener : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        checkBot()
         val pkg = sbn.packageName
         if (pkg != X_PACKAGE && pkg != TEST_PACKAGE) return
         reloadConfig()

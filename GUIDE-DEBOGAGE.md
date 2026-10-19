@@ -10,6 +10,7 @@ Ce guide sert quand l'app **Red Packet Bot** se comporte mal sur le téléphone.
 2. [Demander à Claude](#2-demander-à-claude)
 3. [Les commandes utiles](#3-les-commandes-utiles)
 4. [Résolu : le bot s'endort quand on verrouille ou qu'on quitte l'app (Tecno)](#4-résolu--le-bot-sendort-quand-on-verrouille-ou-quon-quitte-lapp-tecno)
+   - [4 bis. Résolu : HiOS regelait le bot 5 minutes après chaque démarrage](#4-bis-résolu--hios-regelait-le-bot-5-minutes-après-chaque-démarrage)
 5. [Résolu : l'ancien bot Termux tournait encore](#5-résolu--lancien-bot-termux-tournait-encore)
 6. [Résolu : « GAGNÉ » dans les logs, mais rien d'encaissé sur Cryptobox (téléphone)](#6-résolu--gagné-dans-les-logs-mais-rien-dencaissé-sur-cryptobox-téléphone)
 7. [Résolu : Telegram coupé 30 à 50 minutes la nuit (HiOS « AI Net »)](#7-résolu--telegram-coupé-30-à-50-minutes-la-nuit-hios--ai-net-)
@@ -121,11 +122,11 @@ adb shell "dumpsys power | grep mWakefulness="   # → Awake (allumé) ou Asleep
 adb shell input keyevent 26                      # appuie sur le bouton marche/arrêt
 ```
 
-**Le gel HiOS** (voir la [partie 4](#4-résolu--le-bot-sendort-quand-on-verrouille-ou-quon-quitte-lapp-tecno))
+**Le gel HiOS** (voir les parties [4](#4-résolu--le-bot-sendort-quand-on-verrouille-ou-quon-quitte-lapp-tecno) et [4 bis](#4-bis-résolu--hios-regelait-le-bot-5-minutes-après-chaque-démarrage))
 
 ```bash
 adb shell cat /sys/fs/cgroup/apps/uid_<UID>/cgroup.freeze
-                                                 # → 0 = libre, 1 = gelée
+                                                 # → 0 = libre, 1 = gelée (le fichier de l'UID, pas ceux des pid_…)
 adb shell "grep voluntary_ctxt /proc/<PID>/status"
                                                  # 2 fois à 30 s d'écart : le nombre doit augmenter
 adb shell dumpsys activity service com.transsion.usf/.UsfMainService -hiber is_frozen <UID> com.redpacketbot.app
@@ -133,9 +134,15 @@ adb shell dumpsys activity service com.transsion.usf/.UsfMainService -hiber is_f
                                                  #   frozen:netDown (gelée ET coupée d'Internet)
 adb shell "logcat -d | grep -E 'Usf_Hiber|isProgressing' | grep -E 'redpacket|<UID>'"
                                                  # le journal du gel pour l'app
+adb shell "logcat -d -v time | grep Usf_appStateManager | grep -E 'uid[:=] ?<UID>' | grep -v isTraffic"
+                                                 # → toutes les 4 min : Clear progress start time, puis Record…
+                                                 #   « Progress timeout exceeded » = le gel des 5 min (partie 4 bis)
 adb shell "dumpsys notification --noredact | grep -A30 pkg=com.redpacketbot.app | grep -E 'android.title=|showChronometer'"
                                                  # → android.showChronometer=Boolean (true)
 ```
+
+> [!WARNING]
+> **Pour mesurer le gel, ne lis que `cgroup.freeze`.** `dumpsys activity service com.redpacketbot.app/.BotService` appelle l'app elle-même : HiOS la dégèle pour répondre (`unfreeze … reason:asyncBinderWhiteList` dans le journal), ce qui fausse la mesure. `dumpsys power`, `dumpsys notification` et `dumpsys activity services` (avec un « s ») ne passent que par Android : ils ne réveillent pas l'app.
 
 **La page Binance du bot, vue depuis le PC** (outils développeur de Chromium)
 
@@ -244,8 +251,98 @@ C'est sans conséquence pratique. Les connexions tiennent, et un message arrivé
 
 - Garde `setUsesChronometer(true)` sur **chaque** mise à jour de la notification du bot (toutes passent par `buildNotification()`).
 - N'utilise **pas** `NotificationCompat` (androidx) pour les notifications de l'app. Il ajoute toujours `android.progress = 0` et `android.progressMax = 0`, que HiOS lit comme une progression **terminée** : la protection de toute l'appli saute. On le voit avec Telegram dans le journal : `isProgressing:true`, puis aussitôt `false`. L'app utilise le `Notification.Builder` d'Android.
-- Pour la même raison, jamais de `setProgress(max, max)` (progression finie).
-- HiOS garde l'état « en cours » quand la notification disparaît, et lors d'une mise à jour de l'app. Seule exception : si son propre service redémarre, l'app n'est plus protégée jusqu'à la prochaine mise à jour de sa notification (au plus 15 s).
+- Pour la même raison, jamais de `setProgress(max, max)` (progression finie) ailleurs que dans la remise à zéro de la [partie 4 bis](#4-bis-résolu--hios-regelait-le-bot-5-minutes-après-chaque-démarrage), qui l'utilise exprès, suivie aussitôt de la notification normale.
+- **Corrigé le 19/10/2026 :** HiOS ne garde **pas** l'état « en cours » quand une notification avec chronomètre disparaît. Le retrait de n'importe laquelle (`stopForeground`, `cancel`) efface l'état de **toute** l'app. Voir la partie 4 bis.
+- Si le service de HiOS redémarre, l'app n'est plus protégée jusqu'à la prochaine mise à jour de sa notification (au plus 15 s).
+
+---
+
+## 4 bis. Résolu : HiOS regelait le bot 5 minutes après chaque démarrage
+
+**Résolu le 19/10/2026**, sur le même Tecno Camon 40 (HiOS 16.2, `UsfApp` 26.08.05.001).
+
+### Le symptôme
+
+- Le bot « s'arrête parfois », ne reste pas actif en arrière-plan, et ne repart pas tout seul. Des Red Packets sont ratés.
+- Les logs du bot montrent des dizaines de `💤 Le système a endormi le bot pendant …` : **22 sommeils entre le 18/10 11 h et le 19/10 15 h**, de 5 min à 2 h 05. Le bot dormait plus qu'il ne travaillait.
+- Une nuit, plus aucune ligne de 19:38 à 04:50 : le bot était gelé tout ce temps.
+
+### Le diagnostic
+
+1. Juste après une relance du bot, `cgroup.freeze` de l'UID valait `1`, **écran allumé**.
+2. Le journal de HiOS donnait la raison :
+
+   ```
+   Usf_appStateManager: Progress timeout exceeded: uid=10459, elapsed=324s
+   Usf_appStateManager: Progress notification timeout for freeze policy: uid=10459, pkg=com.redpacketbot.app
+   Usf_Hiber/appStateMachine: uid:10459 enter FrozenState
+   ```
+
+3. `elapsed=324s` comptait depuis le démarrage du bot (15:13:10) : le gel tombait **5 min après chaque démarrage**, puis durait jusqu'à l'ouverture de l'app.
+4. `dumpsys activity exit-info` montrait aussi des arrêts `reason=13 … subreason=202 (Process reclaim scene app launch) … mIsHiber=true mHiberReason='frozen'` : HiOS tue un bot **gelé** quand il manque de mémoire au lancement d'une appli.
+
+### La cause
+
+Lue dans `UsfApp.apk` (classe `TranAppStateManager$NotificationListener`, désassemblée avec `baksmali`) :
+
+- À chaque notification de l'app qui a un chronomètre (`android.showChronometer`) ou une clé `android.progress`, HiOS marque l'app « en cours » et note l'heure de début, **seulement si aucune n'est déjà notée** (`recordProgressStartTime`).
+- Il efface cette heure **uniquement** quand :
+  - une de ces notifications est retirée (`onNotificationRemoved`) ;
+  - ou quand sa progression est terminée : `android.progress ≥ android.progressMax`, sans `progressIndeterminate`. Sans clé, `progressMax` vaut 100.
+- Écran éteint (et en arrière-plan écran allumé), l'app n'est épargnée que tant que `maintenant − début ≤ 300 000 ms` (`isProgressTimeoutExceeded`). Au-delà, elle est gelée, et rien ne la dégèle à part toi.
+- Notre chronomètre ne finit jamais : l'heure de début n'était jamais effacée. Le test du 08/10 (partie 4) avait réussi parce qu'il commençait juste après l'installation et que le bot avait alors beaucoup de trafic réseau, qui épargne aussi l'app.
+- Autre détail lu dans le code : le retrait de **n'importe quelle** notification « en cours » de l'app efface l'état de **toutes** (`removeNotifyId` vide la liste de l'UID). Le compte à rebours de relance perdait donc sa protection au retrait de la notification du bot.
+
+### La solution (dans l'app)
+
+- **`BotService.updateNotification()`**, toutes les 4 min :
+  1. elle envoie la notification du bot avec une progression **terminée** `setProgress(0, 0, false)`. Avec un maximum à 0, aucune barre n'est affichée. HiOS efface l'heure de début ;
+  2. elle renvoie aussitôt la notification normale. HiOS recommence une progression et note une nouvelle heure.
+
+  Les deux notifications sont prêtes avant le premier envoi : l'instant où l'app n'est plus « en cours » dure moins de 100 ms (mesures ci-dessous). Ce changement d'état ne déclenche aucun gel par lui-même. Seul le contrôle de HiOS, toutes les 30 s, regarde l'état.
+- **Démarrage du bot** : juste après le retrait de la notification de relance, la notification du bot est republiée. Sans ça, l'app n'était plus protégée pendant la préparation de Node.
+- **Attente avant relance** (`scheduleRestart`, `finishWaiting`) : le compte à rebours est republié 500 ms après le retrait de la notification du bot. Android fait ce retrait un peu plus tard, de son côté.
+- **L'écouteur de notifications relance le bot** (voir la [partie 8](#8-résolu--le-bot-ne-repartait-pas-après-une-mise-à-jour-de-lapp)).
+- Le rapport d'état (`dumpsys activity service com.redpacketbot.app/.BotService`) affiche une ligne `hios: progression renouvelée il y a …`.
+
+### La vérification
+
+Le 19/10/2026, version 419926, puis 419942 :
+
+- **15 min en arrière-plan** (15:52 → 16:07, TikTok ouvert, puis écran éteint) :
+  - remises à zéro à 15:56:22, 16:00:23 et 16:04:23 ;
+  - l'app n'a plus été « en cours » que 4, 13 et 7 ms ;
+  - aucun `Progress timeout exceeded` ;
+  - `cgroup.freeze` à `0`, sauf deux micro-pauses `fastFreeze reason=cpuboost` de 2 à 3 s pendant l'ouverture d'applis (limite connue, partie 4).
+- **Écran éteint** (16:08:46 → 16:10:20, test écourté) : `cgroup.freeze` à `0`, activité du bot en hausse.
+- **Après chaque `adb install -r`** : le bot repart seul en 3 à 5 s (partie 8).
+
+**À vérifier au prochain branchement** : la fenêtre anti-gel (ci-dessous), autorisée par câble le 19/10/2026 à 16:12 juste avant que le téléphone soit débranché :
+
+```bash
+adb shell "dumpsys window windows | grep -c RedPacketBot:freezeGuard"   # → 1
+adb shell "logcat -d | grep 'float_window: packageName=com.redpacketbot.app'"
+                                                 # → à chaque contrôle de HiOS, écran éteint
+adb shell dumpsys activity service com.redpacketbot.app/.BotService
+                                                 # → hios: … fenêtre=affichée autorisation=true
+```
+
+### La fenêtre anti-gel (seconde protection, facultative)
+
+- **Pourquoi :** chaque remise à zéro laisse l'app sans protection quelques millisecondes. HiOS contrôle toutes les 30 s : un contrôle a donc environ une chance sur 7 500 de tomber dans cet instant, soit à peu près une fois toutes les 3 semaines. L'app serait alors gelée jusqu'à ce que tu l'ouvres.
+- **La parade :** HiOS épargne aussi, écran éteint et **sans limite de temps**, une app qui affiche une fenêtre flottante (bit `0x4` du masque, `isActiveFloatWindow`, comptée à l'ajout et au retrait de la fenêtre).
+- **`BotService.showFreezeGuard()`** pose une fenêtre de 1 pixel, transparente et qui laisse passer les appuis, tant que le bot tourne. Seulement si « Afficher par-dessus les autres applis » est autorisé.
+- **Écran Santé** : point « 🪟 Tecno : protection anti-gel renforcée ».
+- **Par câble** : `adb shell appops set com.redpacketbot.app SYSTEM_ALERT_WINDOW allow`. Pour retirer l'autorisation : `… SYSTEM_ALERT_WINDOW default`.
+- **Effet visible :** Android peut afficher une notification discrète « Red Packet Bot s'affiche par-dessus d'autres applis ».
+
+### Ce qui a été écarté
+
+- **Accessibilité** : ne protège pas écran éteint. Le masque des « scènes importantes » écran éteint, `0x335efbc`, n'a pas le bit `0x1000`.
+- **Service de premier plan** : même chose, pas de bit `0x20000` écran éteint.
+- **« Wake lock » spécial de HiOS** (`acquireFreezeWakeLock`) et **liste blanche** (`addRuntimeWhiteApp`) : réservés aux applis système et au shell. Ils seraient perdus au redémarrage, et l'app ne peut pas les demander elle-même.
+- **`set_app_mode`** : refusé sur un téléphone non « debuggable ».
+- **Fenêtre flottante seule** : elle demande une autorisation que tout le monde ne donnera pas. Elle s'ajoute donc à la notification sans la remplacer (ci-dessus).
 
 ---
 
@@ -404,7 +501,12 @@ Le gardien (toutes les 15 min) ne relançait qu'après 10 minutes sans signe de 
 
 **Même chose au redémarrage du téléphone** (constaté le 09/10/2026) : HiOS n'a pas transmis `BOOT_COMPLETED` à l'app, qui n'a pas démarré seule.
 - La parade : autoriser le **démarrage automatique** de Red Packet Bot dans Phone Master (écran Santé de l'app, point « Tecno : démarrage automatique »).
-- Sinon, le gardien relance le bot dans les 15 minutes. C'est une tâche planifiée d'Android, conservée au redémarrage, que HiOS ne bloque pas. Ouvrir l'app le relance aussi tout de suite.
+- Sinon, le gardien relance le bot dans les 15 minutes. C'est une tâche planifiée d'Android, conservée au redémarrage. Ouvrir l'app le relance aussi tout de suite.
+
+**Complété le 19/10/2026** : le gardien ne suffit pas toujours. Si l'app est gelée par HiOS (même un processus seul, sans le bot), HiOS **retient** ses tâches planifiées et ses alarmes jusqu'au dégel. Constaté juste après une mise à jour : Android a relancé le processus « :bot » pour l'écouteur de notifications X, sans le bot, et HiOS l'a gelé 5 s plus tard.
+- **La parade** : l'écouteur de notifications relance lui-même le bot (`XNotificationListener.checkBot()`), à sa connexion puis au plus toutes les 5 min. Android relance cet écouteur tout seul après une mise à jour ou un arrêt forcé : le bot repart donc en quelques secondes, sans ouvrir l'app.
+- **Vérifié le 19/10/2026** : après `adb install -r`, l'annonce de mise à jour est de nouveau bloquée (`limitScheduleReceiverColdLocked`), mais le bot repart seul 3 s après l'installation (`isForeground=true`, `cgroup.freeze` à `0`).
+- Cette parade demande l'accès aux notifications (activé pour X). Sans lui, reste le gardien, ou l'ouverture de l'app.
 
 ---
 
@@ -471,9 +573,10 @@ Une mise à jour de HiOS peut changer les règles du gel. Dans l'ordre :
 2. **La notification « Bot en marche » est-elle affichée, avec son chronomètre ?** Si non : écran Santé → « Notifications autorisées ».
 3. **HiOS épargne-t-il encore l'app ?** Lance `is_frozen` et le journal du gel ([partie 3](#3-les-commandes-utiles)), écran éteint :
    - pas de `isProgressing:true` pour l'app, ou des `freeze uid: <UID>` : la règle de la partie 4 ne marche plus ;
+   - `Progress timeout exceeded` : la remise à zéro des 4 min ([partie 4 bis](#4-bis-résolu--hios-regelait-le-bot-5-minutes-après-chaque-démarrage)) ne passe plus. Il doit y avoir un `Clear progress start time` puis un `Record progress start time` pour l'UID toutes les 4 min, et la ligne `hios:` du rapport d'état doit dater de moins de 4 min 15 s ;
    - pour retrouver ce qui protège une appli, demande à Claude de décompiler de nouveau `UsfApp.apk` (outils : `jadx`, et `dexdump` du SDK Android).
 4. **Les autres pistes**, à garder en réserve. Elles ont été lues dans le code de HiOS en octobre 2026, mais pas testées :
-   - **Fenêtre flottante** (permission « Afficher par-dessus les autres applis ») : HiOS l'épargne aussi écran éteint. C'est la meilleure piste de secours.
+   - **Fenêtre flottante** (permission « Afficher par-dessus les autres applis ») : HiOS l'épargne aussi écran éteint. **En place depuis le 19/10/2026**, si l'autorisation est donnée ([partie 4 bis](#4-bis-résolu--hios-regelait-le-bot-5-minutes-après-chaque-démarrage)).
    - **VPN local** : épargné, mais il prend la place d'un éventuel VPN du téléphone.
    - **Son silencieux** : ne marcherait pas, car HiOS détecte le silence.
    - **Mode « ne jamais geler »** (`setAppMode`) : réservé aux applis système, refusé à ADB.

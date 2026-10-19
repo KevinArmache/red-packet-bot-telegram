@@ -139,6 +139,18 @@ object Health {
             )
         }
 
+        // HiOS épargne sans limite de temps une app qui affiche une fenêtre
+        // flottante (voir BotService.showFreezeGuard)
+        items += Item(
+            "overlay", "🪟 Tecno : protection anti-gel renforcée", Settings.canDrawOverlays(context),
+            "Autorise « Afficher par-dessus les autres applis » : le bot pose une fenêtre invisible de 1 pixel " +
+                "qui empêche HiOS de le geler, en plus de la notification. Android peut afficher " +
+                "« Red Packet Bot s'affiche par-dessus d'autres applis » : c'est normal.",
+            "Autoriser",
+        ) {
+            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$pkg"))
+        }
+
         items += Item(
             "autostart", "Tecno : démarrage automatique", null,
             "Phone Master → Accélérer → Gestion du démarrage auto → active Red Packet Bot. " +

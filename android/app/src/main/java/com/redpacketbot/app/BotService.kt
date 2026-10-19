@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.PixelFormat
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
@@ -20,8 +21,11 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
+import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebView
@@ -70,6 +74,10 @@ class BotService : Service() {
         private const val TELEGRAM_RETRY_MS = 30 * 60_000L
         private const val FROZEN_AFTER_MS = 5 * 60_000L
         private const val TELEGRAM_DEAF_MS = 30 * 60_000L
+        // HiOS ne compte une notification « en cours » que 5 min (voir updateNotification)
+        private const val PROGRESS_RENEW_MS = 4 * 60_000L
+        // Compte à rebours de relance republié après le retrait de la notification du bot
+        private const val RESTART_NOTICE_REPOST_MS = 500L
         // Pompe d'images de la WebView de réclamation (voir pumpTick)
         private const val PUMP_INTERVAL_MS = 33L
         private const val PUMP_DEFAULT_MS = 30_000L
@@ -117,6 +125,11 @@ class BotService : Service() {
     private var lastBrowserState = ""
     /** Début du processus :bot, affiché par le chronomètre de la notification. */
     private val runningSince = System.currentTimeMillis()
+    /** Dernière remise à zéro du compteur « en cours » de HiOS (voir updateNotification). */
+    @Volatile private var progressRenewedAt = 0L
+    private val notificationLock = Any()
+    /** 🪟 Fenêtre anti-gel (voir showFreezeGuard), fil principal seulement. */
+    private var freezeGuard: View? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -150,6 +163,13 @@ class BotService : Service() {
         Status.lastError(state)?.let { out.println("lastError: $it") }
         val config = BotConfig.load(files.config)
         val x = XListenerState.read(files.xListener)
+        out.println(
+            "hios: progression renouvelée " +
+                (if (progressRenewedAt > 0) "il y a ${Status.ago(System.currentTimeMillis() - progressRenewedAt)}" else "jamais") +
+                " (toutes les ${PROGRESS_RENEW_MS / 60_000} min ; HiOS gèle au-delà de 5 min) " +
+                "fenêtre=${if (freezeGuard != null) "affichée" else "absente"} " +
+                "autorisation=${Settings.canDrawOverlays(this)}",
+        )
         out.println(
             "x: enabled=${config.xEnabled} dryRun=${config.xDryRun} access=${XNotificationListener.isAccessGranted(this)} " +
                 "listener=${x.connected} posts=${x.posts} dropped=${x.dropped} " +
@@ -285,6 +305,7 @@ class BotService : Service() {
 
     override fun onDestroy() {
         instance = null
+        hideFreezeGuard()
         scheduler.shutdownNow()
         bridge?.close()
         devtools?.close()
@@ -311,6 +332,11 @@ class BotService : Service() {
         launching = true
         BotState.setStatus(files, BotState.STARTING, "Démarrage de Node.js…")
         Notifications.cancel(this, Notifications.ID_RESTART)
+        // Ce retrait efface aussi chez HiOS l'état « en cours » de la notification
+        // du bot (il oublie toutes celles de l'app) : republiée aussitôt, sinon le
+        // bot pourrait être gelé pendant son démarrage, écran éteint
+        updateNotification()
+        main.post { showFreezeGuard() }
         // L'extraction du code (premier lancement, mise à jour) prend quelques secondes
         scheduler.execute {
             try {
@@ -616,6 +642,8 @@ class BotService : Service() {
         if (!nodeRunning) return
         val heartbeat = Heartbeat.read(files.heartbeat)
         updateNotification(heartbeat)
+        // Autorisation donnée (ou retirée) pendant que le bot tourne
+        main.post { showFreezeGuard() }
 
         val browser = heartbeat?.browser.orEmpty()
         if (browser == "login" && lastBrowserState != "login") {
@@ -742,37 +770,57 @@ class BotService : Service() {
         } else {
             alarm.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pending)
         }
-        val title = if (message == null) "🔑 Telegram à reconnecter" else "♻️ Relance du bot"
-        val text = message ?: "Nouvel essai automatique dans 30 min."
-        getSystemService(NotificationManager::class.java).notify(
-            Notifications.ID_RESTART,
-            Notification.Builder(this, Notifications.CHANNEL_BOT)
-                .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle(title)
-                .setContentText(text)
-                // Compte à rebours jusqu'à la relance : garde aussi l'app hors du gel HiOS
-                // pendant l'attente, sinon l'alarme de relance serait retenue (voir buildNotification)
-                .setWhen(restartAt)
-                .setShowWhen(true)
-                .setUsesChronometer(true)
-                .setChronometerCountDown(true)
-                .setContentIntent(Notifications.openApp(this))
-                .build(),
-        )
+        val notice = restartNotice(restartAt, message)
+        getSystemService(NotificationManager::class.java).notify(Notifications.ID_RESTART, notice)
         // Service arrêté AVANT le processus : sans ça, Android le relancerait
         // tout seul (START_STICKY) une seconde plus tard, sans attendre l'alarme
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelfResult(lastStartId)
-        killSoon()
+        repostRestartNotice(notice)
+        killSoon(RESTART_NOTICE_REPOST_MS + 300)
     }
 
     /** Relance relancée trop tôt par Android : on laisse l'alarme faire son travail. */
     private fun finishWaiting() {
+        val state = BotState.read(files)
+        // Relance Telegram (code 78) : notification sans message, comme dans handleNodeExit
+        val message = if (state.optString("status") == BotState.TELEGRAM_REQUIRED) null else state.optString("message")
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelfResult(lastStartId)
+        repostRestartNotice(restartNotice(state.optLong("restartAt", 0L), message))
+    }
+
+    private fun restartNotice(restartAt: Long, message: String?): Notification {
+        val title = if (message == null) "🔑 Telegram à reconnecter" else "♻️ Relance du bot"
+        val text = message ?: "Nouvel essai automatique dans 30 min."
+        return Notification.Builder(this, Notifications.CHANNEL_BOT)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(text)
+            // Compte à rebours jusqu'à la relance : garde aussi l'app hors du gel HiOS
+            // pendant l'attente, sinon l'alarme de relance serait retenue (voir buildNotification)
+            .setWhen(restartAt)
+            .setShowWhen(true)
+            .setUsesChronometer(true)
+            .setChronometerCountDown(true)
+            .setContentIntent(Notifications.openApp(this))
+            .build()
+    }
+
+    /**
+     * Le retrait de la notification du bot (stopForeground) efface chez HiOS
+     * l'état « en cours » de toutes les notifications de l'app, compte à rebours
+     * compris. Android le fait un peu plus tard, de son côté : le compte à
+     * rebours est donc republié une fois ce retrait passé.
+     */
+    private fun repostRestartNotice(notice: Notification) {
+        main.postDelayed({
+            getSystemService(NotificationManager::class.java).notify(Notifications.ID_RESTART, notice)
+        }, RESTART_NOTICE_REPOST_MS)
     }
 
     private fun finishStopped(keepUserFlag: Boolean = false) {
+        main.post { hideFreezeGuard() }
         if (!keepUserFlag) files.userStopped.writeText("1")
         val state = BotState.read(files)
         if (state.optString("status") != BotState.CONFIG_MISSING) {
@@ -785,9 +833,56 @@ class BotService : Service() {
         if (NodeRuntime.started) killSoon()
     }
 
-    private fun killSoon() {
+    private fun killSoon(delayMs: Long = 500) {
         CookieManager.getInstance().flush()
-        main.postDelayed({ Process.killProcess(Process.myPid()) }, 500)
+        main.postDelayed({ Process.killProcess(Process.myPid()) }, delayMs)
+    }
+
+    // ─── Fenêtre anti-gel (Tecno) ───────────────────────────────────────────
+    //
+    // HiOS épargne aussi, écran éteint et sans limite de temps, une app qui
+    // affiche une fenêtre flottante. Une fenêtre de 1 pixel, transparente et
+    // qui laisse passer les appuis, double la protection de la notification
+    // (dont la remise à zéro laisse l'app sans protection quelques
+    // millisecondes toutes les 4 min). Seulement si « Afficher par-dessus les
+    // autres applis » est autorisé : sinon, la notification seule protège.
+    // Fil principal seulement.
+
+    private fun showFreezeGuard() {
+        if (!Settings.canDrawOverlays(this) || !nodeRunning) {
+            // Autorisation retirée, ou bot arrêté
+            hideFreezeGuard()
+            return
+        }
+        if (freezeGuard != null) return
+        val view = View(this)
+        val params = WindowManager.LayoutParams(
+            1, 1,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSPARENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            title = "RedPacketBot:freezeGuard"
+        }
+        try {
+            getSystemService(WindowManager::class.java).addView(view, params)
+            freezeGuard = view
+        } catch (e: Exception) {
+            Log.w(TAG, "Fenêtre anti-gel impossible : ${e.message}")
+        }
+    }
+
+    private fun hideFreezeGuard() {
+        val view = freezeGuard ?: return
+        freezeGuard = null
+        try {
+            getSystemService(WindowManager::class.java).removeView(view)
+        } catch (_: Exception) {
+            /* déjà retirée (autorisation retirée) */
+        }
     }
 
     // ─── Notification permanente ────────────────────────────────────────────
@@ -815,11 +910,28 @@ class BotService : Service() {
     private fun updateNotification(heartbeat: Heartbeat? = Heartbeat.read(files.heartbeat)) {
         val state = BotState.read(files)
         val (title, text) = Status.describe(state, heartbeat, nodeRunning)
-        getSystemService(NotificationManager::class.java)
-            .notify(Notifications.ID_BOT, buildNotification(title, text))
+        val manager = getSystemService(NotificationManager::class.java)
+        val notification = buildNotification(title, text)
+        // Les deux envois se suivent, sans autre mise à jour entre eux
+        synchronized(notificationLock) {
+            val now = System.currentTimeMillis()
+            if (now - progressRenewedAt >= PROGRESS_RENEW_MS) {
+                // HiOS n'épargne une app « en cours » que 5 min après le début de
+                // sa progression, puis la gèle quand même (sans fin : jusqu'à
+                // l'ouverture de l'app). Une progression terminée (0 sur 0 : aucune
+                // barre affichée) efface ce début ; la notification normale envoyée
+                // juste après en commence une nouvelle (voir GUIDE-DEBOGAGE.md, partie 4 bis).
+                // Entre les deux, l'app n'est plus « en cours » : les deux sont prêtes
+                // avant le premier envoi, pour que cet instant soit le plus court possible
+                val done = buildNotification(title, text, progressDone = true)
+                manager.notify(Notifications.ID_BOT, done)
+                progressRenewedAt = now
+            }
+            manager.notify(Notifications.ID_BOT, notification)
+        }
     }
 
-    private fun buildNotification(title: String, text: String): Notification {
+    private fun buildNotification(title: String, text: String, progressDone: Boolean = false): Notification {
         val stop = PendingIntent.getService(
             this, 1, Intent(this, BotService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
@@ -836,10 +948,12 @@ class BotService : Service() {
             // Le gel de HiOS (Usf_Hiber) ignore les services de premier plan et gèle
             // l'app (processeur ET réseau) 5 s après la mise en veille ou la sortie de
             // l'app ; il épargne en revanche une app dont une notification affiche un
-            // chronomètre ou une progression en cours (voir GUIDE-DEBOGAGE.md, partie 4)
+            // chronomètre ou une progression en cours, pendant 5 min, renouvelées par
+            // updateNotification (voir GUIDE-DEBOGAGE.md, parties 4 et 4 bis)
             .setWhen(runningSince)
             .setShowWhen(true)
             .setUsesChronometer(true)
+            .apply { if (progressDone) setProgress(0, 0, false) }
             .setContentIntent(Notifications.openApp(this))
             .addAction(Notification.Action.Builder(null, "Arrêter", stop).build())
             .build()

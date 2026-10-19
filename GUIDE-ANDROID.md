@@ -188,6 +188,8 @@ Le bot utilise ensuite la même session, dans une page invisible.
 >
 > L'app s'en protège toute seule : HiOS épargne les applis dont une notification affiche un chronomètre en cours. Sa notification **« Bot en marche »** affiche donc depuis combien de temps le bot tourne.
 >
+> HiOS ne compte ce chronomètre que pendant 5 minutes. L'app le relance discrètement toutes les 4 minutes, sans rien changer à ce que tu vois (détails dans le [guide de débogage](GUIDE-DEBOGAGE.md#4-bis-résolu--hios-regelait-le-bot-5-minutes-après-chaque-démarrage)).
+>
 > 👉 **Ne désactive jamais cette notification.** Tu peux la replier dans le volet, mais si tu la coupes, HiOS gèle de nouveau le bot.
 
 Ouvre l'écran **🩺 Santé** : touche la pastille **🩺 11/12** en haut à droite de l'Accueil, ou **⚙️ Réglages** → **🩺 Santé du téléphone**. Le score compte les points en ordre ; il passe au rouge s'il manque un réglage **🚨 indispensable**. Chaque point a un bouton qui ouvre le bon écran des réglages :
@@ -205,13 +207,14 @@ Ouvre l'écran **🩺 Santé** : touche la pastille **🩺 11/12** en haut à dr
 6. **Heure automatique** → active la date et l'heure automatiques. Le bot compare l'heure du téléphone à celle de Telegram.
 7. **Compatibilité Node.js** → doit être ✅ (voir le [dépannage](#11-dépannage) sinon).
 8. **Tecno : réseau gardé la nuit** (seulement sur HiOS) → doit être ✅. Sinon, la fonction « AI Net » de HiOS coupe le Wi-Fi et les données pendant ton sommeil, et le bot rate les codes. Pour la couper, PC branché en USB : `adb shell settings put global ai_net_control_enable 0`, puis redémarre le téléphone (détails dans le [guide de débogage](GUIDE-DEBOGAGE.md#7-résolu--telegram-coupé-30-à-50-minutes-la-nuit-hios--ai-net-)).
+9. **🪟 Tecno : protection anti-gel renforcée** (recommandé) → **Autoriser**, puis active **Afficher par-dessus les autres applis**. Le bot pose une fenêtre invisible de 1 pixel qui double la protection de la notification. Android peut afficher « Red Packet Bot s'affiche par-dessus d'autres applis » : c'est normal.
 
 **À faire à la main sur Tecno / HiOS 15 :**
 
-8. **Démarrage automatique** : **Phone Master** → **Accélérer** → **Gestion du démarrage auto** → active **Red Packet Bot**. Puis **Phone Master** → menu (en haut à gauche) → **Réglages** → **Applis protégées** → ajoute **Red Packet Bot**.
-9. **Pas de nettoyage à l'écran verrouillé** : dans les réglages de **Phone Master**, désactive **Nettoyage à l'écran verrouillé**, ou mets l'app en liste blanche. Dans **Réglages** → **Batterie**, désactive l'**économie d'énergie**, **Power Marathon** et l'**optimisation du mode veille**.
-10. **Verrouiller l'app dans les récentes** : ouvre les applis récentes, touche le petit triangle à côté de Red Packet Bot (ou maintiens la carte), puis **Verrouiller**.
-11. **Pas de « congélation »** : appui long sur l'écran d'accueil → **Paramètres du bureau** → **Autres réglages** → **Congélateur** : Red Packet Bot ne doit pas y être.
+10. **Démarrage automatique** : **Phone Master** → **Accélérer** → **Gestion du démarrage auto** → active **Red Packet Bot**. Puis **Phone Master** → menu (en haut à gauche) → **Réglages** → **Applis protégées** → ajoute **Red Packet Bot**.
+11. **Pas de nettoyage à l'écran verrouillé** : dans les réglages de **Phone Master**, désactive **Nettoyage à l'écran verrouillé**, ou mets l'app en liste blanche. Dans **Réglages** → **Batterie**, désactive l'**économie d'énergie**, **Power Marathon** et l'**optimisation du mode veille**.
+12. **Verrouiller l'app dans les récentes** : ouvre les applis récentes, touche le petit triangle à côté de Red Packet Bot (ou maintiens la carte), puis **Verrouiller**.
+13. **Pas de « congélation »** : appui long sur l'écran d'accueil → **Paramètres du bureau** → **Autres réglages** → **Congélateur** : Red Packet Bot ne doit pas y être.
 
 Laisse le téléphone **en charge**, idéalement avec une limite de charge si le téléphone en propose une.
 
