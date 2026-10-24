@@ -4,7 +4,9 @@ import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import android.util.Log
+import org.json.JSONObject
 
 /** Doit-on faire tourner le bot ? (réglages complets, pas arrêté par toi) */
 fun shouldRun(context: Context): Boolean {
@@ -47,8 +49,25 @@ fun ensureBotRunning(context: Context, reason: String) {
     if (!shouldRun(context) || isBotServiceRunning(context)) return
     val files = AppFiles(context)
     if (!files.telegramSession.exists()) return
-    if (BotState.read(files).optLong("restartAt", 0L) > System.currentTimeMillis()) return
+    val state = BotState.read(files)
+    if (state.optLong("restartAt", 0L) > System.currentTimeMillis() && !restartAlarmLost(context, state)) return
     startBotSafely(context, reason)
+}
+
+/**
+ * L'alarme d'une relance programmée disparaît avec une mise à jour de l'app ou
+ * un redémarrage du téléphone : plus rien ne relancerait le bot avant l'heure
+ * prévue (jusqu'à 10 min d'attente, bot arrêté, le 24/10/2026).
+ */
+private fun restartAlarmLost(context: Context, state: JSONObject): Boolean {
+    val scheduledAt = state.optLong("restartScheduledAt", state.optLong("lastExitAt", 0L))
+    val updatedAt = try {
+        context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+    } catch (_: Exception) {
+        0L
+    }
+    val bootedAt = System.currentTimeMillis() - SystemClock.elapsedRealtime()
+    return scheduledAt > 0 && scheduledAt < maxOf(updatedAt, bootedAt)
 }
 
 /**

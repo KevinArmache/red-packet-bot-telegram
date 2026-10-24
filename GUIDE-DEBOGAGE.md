@@ -509,6 +509,9 @@ Le gardien (toutes les 15 min) ne relançait qu'après 10 minutes sans signe de 
 - **Vérifié le 19/10/2026** : après `adb install -r`, l'annonce de mise à jour est de nouveau bloquée (`limitScheduleReceiverColdLocked`), mais le bot repart seul 3 s après l'installation (`isForeground=true`, `cgroup.freeze` à `0`).
 - Cette parade demande l'accès aux notifications (activé pour X). Sans lui, reste le gardien, ou l'ouverture de l'app.
 
+**Complété le 24/10/2026** : une mise à jour installée **pendant une attente de relance** laissait le bot arrêté jusqu'à 10 min. Constaté juste après une version qui plantait au démarrage (`SyntaxError`, voir les pièges de la [partie 11](#pièges-pour-qui-modifie-lapp-1)) : après chaque plantage, le service programme une relance de plus en plus tard (10 s, puis le double, jusqu'à 10 min) et note son heure (`restartAt`). La mise à jour efface l'alarme, mais l'écouteur, l'ouverture de l'app et le gardien respectaient encore `restartAt`, et l'app restait arrêtée (`No services match`).
+- **La solution** (`ensureBotRunning`, `Receivers.kt`) : une relance programmée avant la dernière mise à jour de l'app, ou avant le dernier redémarrage du téléphone, ne retient plus le bot. Il repart dès l'installation.
+
 ---
 
 ## 9. Résolu : pauses anti-ban de 2 h plusieurs fois par jour

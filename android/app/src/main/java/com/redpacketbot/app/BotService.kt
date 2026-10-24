@@ -758,6 +758,8 @@ class BotService : Service() {
                 it.put("message", message)
             }
             it.put("restartAt", restartAt)
+            // Pour savoir si l'alarme a disparu depuis (ensureBotRunning)
+            it.put("restartScheduledAt", System.currentTimeMillis())
         }
         val alarm = getSystemService(AlarmManager::class.java)
         val pending = PendingIntent.getBroadcast(
