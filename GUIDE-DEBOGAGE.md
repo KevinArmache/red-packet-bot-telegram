@@ -16,6 +16,7 @@ Ce guide sert quand l'app **Red Packet Bot** se comporte mal sur le téléphone.
 7. [Résolu : Telegram coupé 30 à 50 minutes la nuit (HiOS « AI Net »)](#7-résolu--telegram-coupé-30-à-50-minutes-la-nuit-hios--ai-net-)
 8. [Résolu : le bot ne repartait pas après une mise à jour de l'app](#8-résolu--le-bot-ne-repartait-pas-après-une-mise-à-jour-de-lapp)
 9. [Résolu : pauses anti-ban de 2 h plusieurs fois par jour](#9-résolu--pauses-anti-ban-de-2-h-plusieurs-fois-par-jour)
+   - [9 bis. Résolu : des codes valides comptés comme faux (fenêtre « Déconnecté » de Binance)](#9-bis-résolu--des-codes-valides-comptés-comme-faux-fenêtre--déconnecté--de-binance)
 10. [Si le bot s'endort de nouveau](#10-si-le-bot-sendort-de-nouveau)
 11. [X (Twitter) : lecture des notifications de l'appli X](#11-x-twitter--lecture-des-notifications-de-lappli-x)
 
@@ -562,6 +563,67 @@ C'était le bot qui se bloquait, pas Binance : `claimFailure` (`src/binance.js`)
   - « il vous reste 7 tentatives » → aucune pause ;
   - `403067` → pause lue dans le message.
 - **À surveiller au premier code refusé** : la ligne `📭 Code X — [code] texte · N essai(s) restant(s)`. Si `N` n'apparaît pas alors que Binance l'affiche, il faut adapter `parseRemaining` au texte exact.
+
+---
+
+## 9 bis. Résolu : des codes valides comptés comme faux (fenêtre « Déconnecté » de Binance)
+
+**Résolu le 24/10/2026.**
+
+### Le symptôme
+
+Plus aucun Red Packet réclamé : tous les codes, même valides, finissaient en
+
+```
+❔ Code QLZ3FQ2W — fenêtre « Ouvrir » jamais affichée : résultat inconnu, vérifie l'historique Cryptobox (aucun retry)
+```
+
+environ 45 s après `🚀 Réclamation en cours`. Ces résultats inconnus étaient comptés comme des codes faux : 9 d'affilée, puis `⛔ ARRÊT ANTI-BLOCAGE`, et tous les codes suivants étaient sautés. Après `#reprendre`, ça recommençait.
+
+### Le diagnostic
+
+1. **Les logs** (`… BotService logs 5000`) : dernier gain à 04:43, premier échec à 05:04, rien entre les deux. Chaque échec dure 45 s : 20 s sans réponse à `code/query`, puis 20 s sans fenêtre « Ouvrir ».
+2. **La page Binance du bot, vue depuis le PC** ([partie 3](#3-les-commandes-utiles)) : bonne adresse, connectée en apparence, et le dernier code toujours tapé dans le champ.
+3. **Un espion réseau** (protocole DevTools) pendant une vraie réclamation : le code est tapé, mais **aucune requête** ne part vers Binance.
+4. **Ce qu'il y a sous le bouton « Réclamer »** (`document.elementFromPoint` au centre du bouton) : pas le bouton, mais `div#refresh-token-shadow-host` (z-index 2147483645), et `<body>` a la classe `bn-mask-body`.
+5. **Le contenu de ce shadow DOM** : une fenêtre « **Déconnecté** — Vous êtes déconnecté. Vous devez vous reconnecter pour continuer. (Refresh Token Timeout) », avec un bouton « Connexion » et un voile plein écran.
+6. **La console de la page** : `refreshToken error … Refresh Token Timeout` à 03:51 UTC, soit 04:51 au téléphone. Pourtant les cookies de session (`p20t`, `d1og`…) avaient été renouvelés 15 s plus tôt, valables 5 jours.
+
+### La cause
+
+Écran éteint, le renouvellement de la session Binance a répondu trop tard pour la page : elle a abandonné l'attente et affiché sa fenêtre « Déconnecté », **sans changer d'adresse**. Le bot ne la voyait pas :
+
+- l'adresse restait celle de Cryptobox, et le champ du code restait « visible » pour Playwright, sous le voile ;
+- sur le téléphone, les clics sont forcés (`force: true`) : ils tombaient sur le voile, sans erreur ;
+- le code n'était donc jamais soumis à Binance, mais le bot le comptait comme faux (résultat inconnu = prudence).
+
+La session était en fait toujours valide : un simple rechargement de la page a suffi.
+
+### La solution (src/binance.js)
+
+- **`readSessionLost`** repère la fenêtre « Déconnecté » (document, et shadow DOM ouverts posés sur `<body>`).
+- **Avant de taper un code**, si elle est là : rechargement de la page (aucun code tapé, aucune tentative brûlée). Session valide → la réclamation continue. Fenêtre toujours là ou page de connexion → « 🔑 Session Binance expirée — code non soumis », et l'alerte de reconnexion habituelle.
+- **Toutes les minutes entre deux codes** (`sessionWatchTick`), la même recherche : la fenêtre est réglée avant le prochain code, pas pendant. Une réclamation qui arrive pendant ce rechargement l'attend.
+- **Un clic « Réclamer » qui ne déclenche aucune requête** (`waitGiftRequest`) donne `⏭️ Code X non soumis — clic « Réclamer » sans effet (bouton recouvert par div#…)`. Le code est classé `page_unavailable`, que l'anti-blocage ne compte pas. Ce filet vaut pour tout ce qui pourrait recouvrir le bouton à l'avenir.
+- `checkLoginStatus` et la surveillance de reconnexion ne prennent plus la page pour connectée quand la fenêtre la recouvre.
+
+### La vérification
+
+- `npm run test:claim` : 3 nouveaux scénarios (fenêtre « Déconnecté » → rechargement puis gagné ; fenêtre qui revient → reconnexion, rien de tapé ; clic sans effet → non soumis). Sur l'ancien code, les trois échouent exactement comme sur le téléphone (`unknown`, compté comme soumis).
+- `npm run test:guard` : un code non soumis (`page_unavailable`) ne fait pas avancer le compteur.
+- Sur le téléphone, après installation : `🔓 Session Binance active`, puis les 3 premiers codes gagnés. Le compteur anti-blocage est revenu à 0 au premier gain.
+
+### Pour vérifier soi-même
+
+Dans la console DevTools de la page du bot ([partie 3](#3-les-commandes-utiles)) :
+
+```js
+document.getElementById('refresh-token-shadow-host')?.shadowRoot?.querySelector('[role="dialog"]')?.innerText
+// → undefined si tout va bien ; « Déconnecté… (Refresh Token Timeout) » sinon
+```
+
+> [!NOTE]
+> **Ne rien cliquer dans cette page à la main** : chaque code n'est soumis qu'une fois (règle zéro retry). L'espion réseau et `elementFromPoint` ne font que lire.
 
 ---
 

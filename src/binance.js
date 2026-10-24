@@ -66,6 +66,10 @@ const LOGIN_WATCH_INTERVAL_MS = 20000;
 // Détection « faible » de la session : délai max pour la confirmer.
 const WEAK_LOGIN_CONFIRM_MS = 15000;
 
+// Fenêtre « Déconnecté » de Binance apparue entre deux codes : cherchée
+// toutes les minutes, pour recharger la page avant le prochain code.
+const SESSION_WATCH_INTERVAL_MS = 60000;
+
 // User-agent historique (Windows). BROWSER_USER_AGENT=native garde celui du
 // Chromium réel : indispensable sur Android/Linux pour ne pas contredire les
 // autres indices du navigateur (plateforme, WebGL…). Toute autre valeur est
@@ -151,6 +155,11 @@ let initialLoginWait = false;
 let loginWatchTimer = null;
 let loginCheckRunning = false;
 let appPageSeen = 0;
+let sessionWatchTimer = null;
+// Rechargement après la fenêtre « Déconnecté » : une réclamation attend sa fin
+let sessionRecovery = null;
+// Réclamation en cours : la surveillance de la page n'y touche pas
+let claiming = false;
 
 // Navigateurs fermés volontairement (veille, arrêt) : leur fermeture n'est
 // pas un plantage.
@@ -335,6 +344,7 @@ async function initBrowser(newHooks = {}) {
       cryptoboxPage = null;
       awaitingLogin = false;
       stopLoginWatch();
+      stopSessionWatch();
     }
     reportLoss(context, webview ? 'la WebView Binance s\'est fermée' : 'Chromium s\'est fermé');
   });
@@ -366,6 +376,7 @@ async function initBrowser(newHooks = {}) {
     assertCurrent(gen, page);
 
     cryptoboxPage = page;
+    startSessionWatch();
     logger.success('🟢 Navigateur Binance prêt');
   } catch (err) {
     // Échec (réseau, fermeture volontaire pendant l'attente…) : on ne laisse
@@ -538,6 +549,10 @@ async function checkLoginStatus(page) {
   if (isLoginPage(page.url())) {
     return { connected: false, reason: 'page de connexion Binance' };
   }
+  // Fenêtre « Déconnecté » par-dessus la page : le champ reste visible dessous
+  if (await readSessionLost(page)) {
+    return { connected: false, reason: 'fenêtre « Déconnecté » de Binance' };
+  }
 
   // Stratégie 0 : Champ de saisie Cryptobox visible = connecté
   try {
@@ -622,7 +637,7 @@ async function checkLoginConfirmed(page) {
 async function isCodeInputVisible(page) {
   try {
     const el = await page.$(SELECTORS.codeInput);
-    return Boolean(el) && await el.isVisible().catch(() => false);
+    return Boolean(el) && await el.isVisible().catch(() => false) && !await readSessionLost(page);
   } catch (_) {
     return false; // page en navigation
   }
@@ -750,7 +765,7 @@ async function passiveLoginCheck() {
     if (!isOnCryptobox(url)) return;
 
     const el = await cryptoboxPage.$(SELECTORS.codeInput).catch(() => null);
-    if (el && await el.isVisible().catch(() => false)) {
+    if (el && await el.isVisible().catch(() => false) && !await readSessionLost(cryptoboxPage)) {
       awaitingLogin = false;
       stopLoginWatch();
       logger.success('🔓 Session Binance rétablie — les codes sont de nouveau réclamés');
@@ -762,6 +777,89 @@ async function passiveLoginCheck() {
   } finally {
     loginCheckRunning = false;
   }
+}
+
+// ─── Fenêtre « Déconnecté » de Binance ──────────────────────────────────────
+//
+// Quand le renouvellement de la session échoue, ou que la page abandonne son
+// attente (« Refresh Token Timeout », téléphone en veille), Binance affiche
+// « Vous êtes déconnecté. Vous devez vous reconnecter pour continuer. » dans
+// un shadow DOM, PAR-DESSUS toute la page, sans changer d'adresse. Le champ du
+// code reste « visible » pour Playwright, mais aucun clic n'atteint plus la
+// page : le 24/10/2026, tous les codes ont été tapés sans jamais être soumis,
+// puis comptés comme faux jusqu'à l'arrêt anti-blocage.
+
+const SESSION_LOST_TEXT = /vous êtes déconnecté|\blogged out\b|refresh token/i;
+
+/** Texte de la fenêtre « Déconnecté » affichée sur la page, ou ''. */
+async function readSessionLost(page) {
+  try {
+    return await page.evaluate((source) => {
+      const re = new RegExp(source, 'i');
+      // Le document, et les shadow DOM ouverts posés à la racine (celui de Binance)
+      const hosts = [...document.body.children].filter((el) => el.shadowRoot);
+      const roots = [{ root: document, host: '' }, ...hosts.map((el) => ({ root: el.shadowRoot, host: el.id }))];
+      for (const { root, host } of roots) {
+        for (const dialog of root.querySelectorAll('[role="dialog"]')) {
+          if (dialog.getClientRects().length === 0) continue;
+          const text = (dialog.innerText || '').replace(/\s+/g, ' ').trim();
+          // Fenêtre d'un Red Packet : sa note est écrite par l'expéditeur
+          if (/red packet/i.test(text)) continue;
+          if (re.test(text) || /refresh-token/i.test(host)) return text.substring(0, 200) || 'Déconnecté';
+        }
+      }
+      return '';
+    }, SESSION_LOST_TEXT.source);
+  } catch (_) {
+    return ''; // page en navigation
+  }
+}
+
+/**
+ * Fenêtre « Déconnecté » : la page est rechargée (aucun code tapé). Souvent
+ * Binance a bien renouvelé la session (cookies neufs) et seule la page a
+ * abandonné l'attente : le rechargement suffit.
+ * @returns {Promise<'ok'|'logged_out'|'not_ready'>}
+ */
+async function recoverSessionLost(shown) {
+  logger.warn(`🔑 Binance affiche « ${shown} » par-dessus la page — rechargement de la page Cryptobox`);
+  webview?.boost(30000);
+  await cryptoboxPage.goto(CRYPTOBOX_URL, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => { });
+  const ready = await cryptoboxPage
+    .waitForSelector(SELECTORS.codeInput, { state: 'visible', timeout: PAGE_READY_TIMEOUT_MS })
+    .then(() => true)
+    .catch(() => false);
+  if (isLoginPage(cryptoboxPage.url()) || await readSessionLost(cryptoboxPage)) return 'logged_out';
+  if (!ready || !isOnCryptobox(cryptoboxPage.url())) return 'not_ready';
+  logger.success('🔓 Page Cryptobox rechargée — la session Binance est toujours valide');
+  return 'ok';
+}
+
+function startSessionWatch() {
+  stopSessionWatch();
+  sessionWatchTimer = setInterval(sessionWatchTick, SESSION_WATCH_INTERVAL_MS);
+}
+
+function stopSessionWatch() {
+  if (sessionWatchTimer) clearInterval(sessionWatchTimer);
+  sessionWatchTimer = null;
+}
+
+/**
+ * Entre deux codes : fenêtre « Déconnecté » réglée tout de suite, et non au
+ * prochain code. sessionRecovery est posé avant toute attente : une
+ * réclamation qui arrive pendant ce temps l'attend (claimCode).
+ */
+function sessionWatchTick() {
+  const page = cryptoboxPage;
+  if (claiming || sessionRecovery || awaitingLogin || !page || page.isClosed()) return;
+  sessionRecovery = (async () => {
+    const shown = await readSessionLost(page);
+    if (!shown || page !== cryptoboxPage) return;
+    if (await recoverSessionLost(shown) === 'logged_out') enterAwaitingLogin();
+  })()
+    .catch(() => { })
+    .finally(() => { sessionRecovery = null; });
 }
 
 // ─── Pause anti-ban ─────────────────────────────────────────────────────────
@@ -831,22 +929,46 @@ const CLOSE_SELECTORS = [
   'svg.text-PrimaryText.cursor-pointer',
 ];
 
+/** Requête Cryptobox (POST) pour CE code ? */
+function isGiftRequest(request, pathPart, code) {
+  if (!request.url().includes(pathPart) || request.method() !== 'POST') return false;
+  try {
+    return request.postDataJSON()?.grabCode === code;
+  } catch (_) {
+    return false;
+  }
+}
+
 /**
  * Attend la réponse d'une requête Cryptobox pour CE code (la réponse tardive
  * d'un code précédent est ignorée) : { status, body } ; null si rien n'arrive.
  */
 function waitGiftResponse(page, pathPart, code, timeout) {
   return page
-    .waitForResponse((response) => {
-      if (!response.url().includes(pathPart) || response.request().method() !== 'POST') return false;
-      try {
-        return response.request().postDataJSON()?.grabCode === code;
-      } catch (_) {
-        return false;
-      }
-    }, { timeout })
+    .waitForResponse((response) => isGiftRequest(response.request(), pathPart, code), { timeout })
     .then(async (response) => ({ status: response.status(), body: await response.json().catch(() => null) }))
     .catch(() => null);
+}
+
+/** true dès que la requête Cryptobox de CE code part ; false si rien ne part. */
+function waitGiftRequest(page, pathPart, code, timeout) {
+  return page
+    .waitForRequest((request) => isGiftRequest(request, pathPart, code), { timeout })
+    .then(() => true, () => false);
+}
+
+/** Élément posé sur le centre d'un bouton (« div#id »), ou '' s'il est libre. */
+async function coverOf(button) {
+  try {
+    return await button.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      if (!top || el.contains(top)) return '';
+      return top.tagName.toLowerCase() + (top.id ? `#${top.id}` : '');
+    });
+  } catch (_) {
+    return '';
+  }
 }
 
 /**
@@ -1167,6 +1289,17 @@ function claimFailure(code, refusal) {
  *   code est inscrit à l'historique et au registre partagé AVANT d'être tapé.
  */
 async function claimCode(code, opts = {}) {
+  claiming = true;
+  try {
+    // Page en cours de rechargement (fenêtre « Déconnecté ») : on attend
+    if (sessionRecovery) await sessionRecovery;
+    return await claimOnce(code, opts);
+  } finally {
+    claiming = false;
+  }
+}
+
+async function claimOnce(code, opts) {
   if (Date.now() < pauseUntil) {
     const remainingMins = Math.ceil((pauseUntil - Date.now()) / 60000);
     logger.warn(`⏳ Bot en pause de sécurité Anti-Ban. Code ${code} ignoré. Reprise dans ${remainingMins} min.`);
@@ -1262,6 +1395,18 @@ async function claimCode(code, opts = {}) {
         }
       }
 
+      // Fenêtre « Déconnecté » de Binance par-dessus la page : aucun clic ne
+      // passerait. Rechargement avant toute saisie (aucune tentative brûlée).
+      const sessionLost = await readSessionLost(cryptoboxPage);
+      if (sessionLost) {
+        const state = await recoverSessionLost(sessionLost);
+        if (state === 'logged_out') return loginRequired(code);
+        if (state === 'not_ready') {
+          logger.warn(`⏭️ Code ${code} abandonné — page Cryptobox pas prête après rechargement (aucun retry)`);
+          return { remember: false, status: 'page_unavailable' };
+        }
+      }
+
       // 4. Dernier contrôle du relais, puis inscription AVANT la saisie
       if (opts.canSubmit && !opts.canSubmit()) {
         return { remember: false, status: 'deferred' };
@@ -1276,6 +1421,7 @@ async function claimCode(code, opts = {}) {
       // Réponses de l'API Cryptobox, écoutées AVANT le clic : ce sont elles qui
       // font foi (la page seule ne dit pas si le Red Packet a été encaissé)
       const queryResponse = waitGiftResponse(cryptoboxPage, GIFT_QUERY_PATH, code, GIFT_QUERY_TIMEOUT_MS);
+      const querySent = waitGiftRequest(cryptoboxPage, GIFT_QUERY_PATH, code, GIFT_QUERY_TIMEOUT_MS);
       const grabResponse = waitGiftResponse(
         cryptoboxPage, GIFT_GRAB_PATH, code, GIFT_QUERY_TIMEOUT_MS + OPEN_BUTTON_TIMEOUT_MS + GIFT_GRAB_TIMEOUT_MS,
       );
@@ -1290,6 +1436,17 @@ async function claimCode(code, opts = {}) {
       submitted = true;
 
       const query = await queryResponse;
+      // Ni réponse ni requête : le clic n'a rien déclenché (fenêtre ou voile
+      // par-dessus le bouton). Binance n'a jamais reçu le code : aucun essai
+      // consommé, le compteur anti-blocage n'avance pas.
+      if (!query && !await querySent) {
+        const cover = submitBtn ? await coverOf(submitBtn) : '';
+        logger.warn(
+          `⏭️ Code ${code} non soumis — clic « Réclamer » sans effet` +
+            `${cover ? ` (bouton recouvert par ${cover})` : ''}, Binance n'a rien reçu (aucun retry)`,
+        );
+        return { remember: false, status: 'page_unavailable', submitted: false };
+      }
       // Session expirée juste avant la soumission : réponse « connecte-toi »
       // ou renvoi vers la connexion. Binance n'a pas pris le code en compte.
       if (isLoginPage(cryptoboxPage.url()) || isLoginError(query)) return loginRequired(code);
@@ -1381,6 +1538,7 @@ async function closeBrowser() {
   // Annule aussi un lancement ou une attente de connexion en cours
   initGen++;
   stopLoginWatch();
+  stopSessionWatch();
   const context = browserContext;
   if (!context) return;
   closedOnPurpose.add(context);

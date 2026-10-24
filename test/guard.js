@@ -195,6 +195,8 @@ async function main() {
     check("échec après la soumission : +1", fails(), 3);
     antiban.record({ status: "logged_out" });
     check("session expirée : rien", fails(), 3);
+    antiban.record({ status: "page_unavailable", submitted: false });
+    check("clic « Réclamer » sans effet (Binance n'a rien reçu) : rien", fails(), 3);
     antiban.record({ status: "rate_limited", reason: "captcha", submitted: true });
     check("captcha : rien", fails(), 3);
     antiban.record({ status: "paused" });

@@ -28,7 +28,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let scenario = null;
 let currentCode = "";
-const counters = { query: 0, grab: 0, staleGrab: 0, cookieConfirm: 0 };
+let testContext = null;
+const counters = { query: 0, grab: 0, staleGrab: 0, cookieConfirm: 0, pageLoads: 0 };
 
 const PAGE = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Red Packet | Binance</title>
 <style>body{font-family:sans-serif} [role=dialog]{position:fixed;top:80px;left:400px;width:480px;padding:20px;background:#fff;border:1px solid #888}
@@ -46,6 +47,7 @@ $('cookieConfirm').onclick = () => fetch('/__test/cookie-confirm', { method: 'PO
 $('claim').onclick = async () => {
   $('toast').innerHTML = '';
   const cfg = await (await fetch('/__test/ui')).json();
+  if (cfg.deadClaim) return; // clic sans effet : aucune requête ne part
   $('cookies').style.display = cfg.cookieDialog ? 'block' : 'none';
   const code = $('code').value;
   const res = await post('/bapi/pay/v1/private/binance-pay/gift-box/code/query', { grabCode: code, channel: 'DEFAULT' });
@@ -87,6 +89,23 @@ function envelope(cfg, code, data) {
 }
 </script></body></html>`;
 
+// Fenêtre « Déconnecté » de Binance, telle que relevée sur le téléphone le
+// 24/10/2026 : shadow DOM posé sur <body>, voile plein écran par-dessus tout
+const SESSION_LOST_JS = `(() => {
+  const host = document.createElement('div');
+  host.id = 'refresh-token-shadow-host';
+  host.style.cssText = 'position: relative; z-index: 2147483645;';
+  document.body.appendChild(host);
+  host.attachShadow({ mode: 'open' }).innerHTML =
+    '<div class="refresh-token-el"><div role="presentation" class="bn-mask bn-modal" ' +
+    'style="position:fixed;inset:0;background:rgba(0,0,0,.5)"><div role="dialog" aria-modal="true" ' +
+    'style="position:fixed;top:200px;left:460px;width:360px;background:#222;color:#eee;padding:20px">' +
+    '<div>Déconnecté</div><div>Vous êtes déconnecté. Vous devez vous reconnecter pour continuer. ' +
+    '(Refresh Token Timeout)</div><button>Connexion</button></div></div></div>';
+  document.body.classList.add('bn-mask-body');
+})()`;
+const REMOVE_SESSION_LOST_JS = `document.getElementById('refresh-token-shadow-host')?.remove()`;
+
 const OK_QUERY = {
   code: "000000", message: null, messageDetail: null, success: true,
   data: { grabbed: false, fullyClaimed: false, note: "TG @test", payerNickname: "Nikko_Op", currency: "SPELL", totalCount: 1000 },
@@ -105,7 +124,12 @@ const LURE_NOTE = "Binance sent you 100 USDT ≈ $100";
 async function handle(route) {
   const url = route.request().url();
   if (url.startsWith(CRYPTOBOX)) {
-    return route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body: PAGE });
+    counters.pageLoads++;
+    // Session vraiment perdue : la fenêtre revient à chaque chargement
+    const body = scenario?.sessionLostOnLoad
+      ? PAGE.replace("</body>", `<script>${SESSION_LOST_JS}</script></body>`)
+      : PAGE;
+    return route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body });
   }
   if (url.endsWith("/__test/ui")) {
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(scenario.ui ?? {}) });
@@ -139,6 +163,7 @@ const realLaunch = chromium.launchPersistentContext.bind(chromium);
 chromium.launchPersistentContext = async (dir, options) => {
   const context = await realLaunch(dir, { ...options, headless: true });
   await context.route("**/*", handle);
+  testContext = context;
   return context;
 };
 
@@ -158,6 +183,10 @@ const SCENARIOS = [
   { name: "réponse tardive d'un ancien code ignorée", ui: { staleGrab: true, envelopeDelay: 600 }, query: OK_QUERY, grab: OK_GRAB, expect: { status: "success", gain: "0.0009 SPELL", grab: 1, staleGrab: 1 } },
   { name: "note trompeuse + ouverture sans preuve → inconnu", ui: { keepEnvelope: true }, query: { ...OK_QUERY, data: { ...OK_QUERY.data, note: LURE_NOTE } }, grab: NO_PROOF_GRAB, expect: { status: "unknown", grab: 1 } },
   { name: "session Binance expirée (HTTP 401)", queryStatus: 401, query: { code: "100002001", message: "Please log in first", messageDetail: null, success: false, data: null }, expect: { status: "logged_out", grab: 0 }, waitLogin: true },
+  // Fenêtre « Déconnecté » (Refresh Token Timeout) par-dessus la page, adresse inchangée
+  { name: "fenêtre « Déconnecté » → page rechargée, puis gagné", before: SESSION_LOST_JS, query: OK_QUERY, grab: OK_GRAB, expect: { status: "success", gain: "0.0009 SPELL", grab: 1, pageLoads: 1 } },
+  { name: "fenêtre « Déconnecté » qui revient → reconnexion, rien de tapé", before: SESSION_LOST_JS, sessionLostOnLoad: true, query: OK_QUERY, expect: { status: "logged_out", grab: 0, query: 0, submitting: 0, pageLoads: 1 }, waitLogin: true, login: REMOVE_SESSION_LOST_JS },
+  { name: "clic « Réclamer » sans effet → non soumis (≈ 20 s)", ui: { deadClaim: true }, query: OK_QUERY, expect: { status: "page_unavailable", submitted: false, grab: 0, query: 0 } },
   // Anti-blocage : un avertissement « il vous reste N tentatives » n'est pas un blocage
   { name: "code faux, « il vous reste 7 tentatives » → pas de pause", query: apiError("Code incorrect. Il vous reste 7 tentatives."), expect: { status: "permanent_failure", reason: "invalid", remaining: 7, grab: 0, noPause: true } },
   { name: "code faux (403803) → pas de pause", query: apiError("Invalid code", "403803"), expect: { status: "permanent_failure", reason: "invalid", grab: 0, noPause: true } },
@@ -179,18 +208,28 @@ async function main() {
     counters.grab = 0;
     counters.staleGrab = 0;
     counters.cookieConfirm = 0;
+    counters.pageLoads = 0;
     let submitting = 0;
     const code = `TEST${String(index).padStart(4, "0")}`;
     currentCode = code;
+    if (s.before) await testContext.pages()[0].evaluate(s.before);
     const started = Date.now();
     const result = await binance.claimCode(code, { canSubmit: () => true, onSubmitting: () => submitting++ });
     await sleep(500); // une requête tardive serait comptée
     const problems = [];
     if (result.status !== s.expect.status) problems.push(`statut ${result.status} (attendu ${s.expect.status})`);
     if (s.expect.gain && result.gain !== s.expect.gain) problems.push(`montant « ${result.gain} » (attendu « ${s.expect.gain} »)`);
-    if (submitting !== 1) problems.push(`code inscrit ${submitting} fois avant saisie (attendu 1)`);
-    if (counters.query !== 1) problems.push(`${counters.query} « Réclamer » (attendu 1)`);
+    const expectSubmitting = s.expect.submitting ?? 1;
+    const expectQuery = s.expect.query ?? 1;
+    if (submitting !== expectSubmitting) problems.push(`code inscrit ${submitting} fois avant saisie (attendu ${expectSubmitting})`);
+    if (counters.query !== expectQuery) problems.push(`${counters.query} « Réclamer » (attendu ${expectQuery})`);
     if (counters.grab !== s.expect.grab) problems.push(`${counters.grab} « Ouvrir » (attendu ${s.expect.grab})`);
+    if (s.expect.pageLoads !== undefined && counters.pageLoads !== s.expect.pageLoads) {
+      problems.push(`${counters.pageLoads} chargement(s) de la page (attendu ${s.expect.pageLoads})`);
+    }
+    if (s.expect.submitted !== undefined && result.submitted !== s.expect.submitted) {
+      problems.push(`submitted=${result.submitted} (attendu ${s.expect.submitted})`);
+    }
     if (counters.cookieConfirm) problems.push("bouton de la fenêtre des cookies cliqué");
     if ((s.expect.staleGrab ?? 0) !== counters.staleGrab) problems.push(`${counters.staleGrab} réponse(s) d'un autre code (attendu ${s.expect.staleGrab ?? 0})`);
     if (s.expect.reason && result.reason !== s.expect.reason) problems.push(`refus « ${result.reason} » (attendu « ${s.expect.reason} »)`);
@@ -205,7 +244,12 @@ async function main() {
     if (s.resetPause) binance._resetPauseForTests();
     const ms = Date.now() - started;
     if (s.waitLogin) {
-      // Session « rétablie » toute seule (la page simulée est connectée) avant la suite
+      // Session « rétablie » toute seule (la page simulée est connectée) avant la suite,
+      // ou reconnexion simulée (fenêtre « Déconnecté » retirée)
+      if (s.login) {
+        scenario = { ...s, sessionLostOnLoad: false };
+        await testContext.pages()[0].evaluate(s.login);
+      }
       const deadline = Date.now() + 90_000;
       while (binance.getStatus().awaitingLogin && Date.now() < deadline) await sleep(1000);
       if (binance.getStatus().awaitingLogin) problems.push("session jamais rétablie après le scénario");
