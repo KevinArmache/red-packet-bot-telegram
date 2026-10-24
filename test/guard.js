@@ -316,6 +316,22 @@ async function main() {
   }
 
   // ─── Extraction : source de chaque code ───────────────────────────────────
+  // Le Node.js mobile du téléphone n'a pas les tables Unicode : une seule
+  // classe `\p{…}` l'empêche de charger le module, et le bot ne démarre plus
+  // (24/10/2026). Le Node.js du PC, lui, l'accepte : ce test le rattrape.
+  section("Code chargeable par le Node.js mobile du téléphone");
+  {
+    const dirs = [path.join(__dirname, "../src"), path.join(__dirname, "../android/node"), path.join(__dirname, "..")];
+    const files = dirs.flatMap((dir) =>
+      fs.readdirSync(dir).filter((f) => f.endsWith(".js")).map((f) => path.join(dir, f)));
+    const offenders = files.filter((file) =>
+      fs.readFileSync(file, "utf8")
+        .split("\n")
+        .filter((line) => !/^\s*(?:\/\/|\*|\/\*)/.test(line))
+        .some((line) => /\\{1,2}[pP]\{/.test(line)));
+    check("aucune classe Unicode \\p{…} hors commentaires", offenders.map((f) => path.relative(path.join(__dirname, ".."), f)), []);
+  }
+
   section("Extraction : source des codes, codes BP ignorés");
   {
     const { extractCodes } = require("../src/telegram");
@@ -349,6 +365,29 @@ async function main() {
     ]);
     check("mot courant seul en message : ignoré", extractCodes({ plain: "TELEGRAM", trusted: [] }), []);
     check("« BP » de 8 caractères ignoré", extractCodes({ plain: "Code : BPVV80RZ", trusted: ["BPVV80RZ"] }), []);
+
+    // Formats variés (24/10/2026)
+    const plain = (text) => extractCodes({ plain: text, trusted: [] });
+    check("« Code 👉 » puis un code 100 % lettres", plain("Red packet ! Code 👉 LJSSNXTT"), [{ code: "LJSSNXTT", source: "label" }]);
+    check("« Code 2 : » numéroté", plain("Code 2 : PABVFEBL"), [{ code: "PABVFEBL", source: "label" }]);
+    check("« Code ➡️ « … » » entre guillemets", plain("Code ➡️ « QWRTPLKM »"), [{ code: "QWRTPLKM", source: "label" }]);
+    check("« Kode: » (indonésien)", plain("Kode: PABVFEBL"), [{ code: "PABVFEBL", source: "label" }]);
+    check("« 口令： » (chinois)", plain("红包口令：AB12CD34"), [{ code: "AB12CD34", source: "label" }]);
+    check("« Code: » en minuscules avec chiffres", plain("code: ab12cd34"), [{ code: "AB12CD34", source: "label" }]);
+    check("« code tomorrow » : mot en minuscules ignoré", plain("Red packet code tomorrow"), []);
+    check("« Codes 🎁 » annonce une liste : pas un libellé", plain("Codes 🎁\nPABVFEBL"), [{ code: "PABVFEBL", source: "texte" }]);
+    check("« Kod: » (turc)", plain("🎁 Kod: QWRTPLKM"), [{ code: "QWRTPLKM", source: "label" }]);
+    check("liste numérotée en émojis « 1️⃣ »", plain("Red packet codes\n1️⃣ LJSSNXTT\n2️⃣QWRTPLKM"), [
+      { code: "LJSSNXTT", source: "texte" },
+      { code: "QWRTPLKM", source: "texte" },
+    ]);
+    check("plusieurs codes sur une ligne", plain("Red packet 🧧\nOWUVALT5 | LJSSNXTT, PABVFEBL"), [
+      { code: "OWUVALT5", source: "texte" },
+      { code: "LJSSNXTT", source: "texte" },
+      { code: "PABVFEBL", source: "texte" },
+    ]);
+    check("ligne de mots en majuscules : ignorée", plain("Red packet 🧧\nBREAKING TRENDING\nTOMORROW"), []);
+    check("Telegram : code 100 % lettres dans une phrase toujours ignoré", plain("Red packet LJSSNXTT pour vous"), []);
   }
 
   // ─── X (Twitter) : posts lus dans les notifications, relais #xcode ────────
@@ -403,7 +442,22 @@ async function main() {
     ]);
     check("code 100 % lettres seul, sans annonce de codes : ignoré", codes({ text: "Bonjour\nLJSSNXTT\nà demain" }), []);
     check("en minuscules sur sa ligne : ignoré", codes({ text: "Red packet\nljssnxtt" }), []);
-    check("dans une phrase : ignoré", codes({ text: "Red packet LJSSNXTT pour vous" }), []);
+    // X : les comptes sont suivis pour leurs codes (24/10/2026)
+    check("dans une phrase : pris s'il a l'air tiré au hasard", codes({ text: "Red packet LJSSNXTT pour vous 🧧" }), [
+      { code: "LJSSNXTT", source: "texte" },
+    ]);
+    check(
+      "dans une phrase : vrais mots et paires de trading ignorés",
+      codes({ text: "🧧 Red packet STRENGTH, SNAPSHOT et LINKUSDT ce soir, BREAKING" }),
+      [],
+    );
+    check("dans une phrase, sans annonce de codes : ignoré", codes({ text: "Bonjour LJSSNXTT à demain" }), []);
+    check("dans une phrase, en minuscules : ignoré", codes({ text: "Red packet ljssnxtt pour vous" }), []);
+    check("image seule : gardée, sans texte", post({ picture: true }).picture && post({ picture: true }).text, "");
+    check("ni texte ni image : ignorée", post({ picture: false }), null);
+    check("raison d'un post trop ancien", x.staleReason({ postedAt: T0, when: 0 }, T0 + 200_000, 180_000, 0), "publié il y a 200 s");
+    check("raison d'un post antérieur au démarrage", x.staleReason({ postedAt: T0, when: 0 }, T0, 180_000, T0 + 1), "publié avant le démarrage du bot");
+    check("extrait sur une ligne", x.excerpt("Red packet 🧧\n\n  AB12CD34  \nvite"), "Red packet 🧧 ⏎ AB12CD34 ⏎ vite");
     check("mot courant seul sur sa ligne : ignoré", codes({ text: "Red packet 🧧\nGOODLUCK\nTELEGRAM\nGIVEAWAY" }), []);
     check("titre d'actualité en majuscules : ignoré", codes({ text: "BREAKING\nBitcoin dépasse les 100k" }), []);
     // Post réel (KorosYT, 15/10/2026) : 14 codes déjà gagnés sur Telegram, comptés à part
@@ -477,10 +531,16 @@ async function main() {
       ["sans inst", "#xcode AB12CD34 src=label from=@b at=1800000000000"],
       ["pas en tête", "note #xcode AB12CD34 src=label from=@b at=1800000000000 inst=3f9a1c2e"],
       ["texte en trop", "#xcode AB12CD34 src=label from=@b at=1800000000000 inst=3f9a1c2e !"],
-      ["mot en texte libre", "#xcode ABCDEFGH src=texte from=@b at=1800000000000 inst=3f9a1c2e"],
+      ["mot courant", "#xcode TELEGRAM src=texte from=@b at=1800000000000 inst=3f9a1c2e"],
     ]) {
       check(`#xcode refusé : ${name}`, x.parseXCode(text), null);
     }
+    // Code 100 % lettres trouvé seul sur sa ligne par le téléphone : le PC le prend aussi
+    check(
+      "#xcode : code 100 % lettres en texte libre accepté",
+      x.parseXCode("#xcode LJSSNXTT src=texte from=@b at=1800000000000 inst=3f9a1c2e")?.code,
+      "LJSSNXTT",
+    );
     check("relais frais (10 s)", x.isFreshRelay(T0, T0 + 10_000), true);
     check("relais périmé (31 s)", x.isFreshRelay(T0, T0 + 31_000), false);
     check("relais daté du futur", x.isFreshRelay(T0 + 20_000, T0), false);

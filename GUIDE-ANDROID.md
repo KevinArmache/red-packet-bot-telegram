@@ -232,7 +232,7 @@ Si **« Android a endormi le bot »** apparaît, un réglage manque (souvent Pho
 
 Des Red Packets sont aussi publiés sur X. Il n'existe pas d'API gratuite pour les lire, et les robots qui lisent le site se font bloquer. L'app fait donc autrement : **le téléphone lit les notifications de l'appli X officielle**, pour les comptes que tu suis avec la cloche. Pour X, c'est toi qui reçois des notifications, comme d'habitude : pas de robot, rien à bloquer.
 
-Les codes X suivent **les mêmes règles que ceux de Telegram**, anti-blocage compris : codes `BP` ignorés, codes en texte libre sautés quand le compteur de codes faux monte. Quand le PC réclame, le téléphone lui transmet chaque code X (voir la [partie 9](#9-le-relais-avec-le-pc)).
+Les codes X suivent **les mêmes règles que ceux de Telegram**, anti-blocage compris : codes `BP` ignorés, codes en texte libre sautés quand le compteur de codes faux monte. Une règle de plus sur X : un code tout en lettres est pris aussi au milieu d'une phrase, s'il a l'air tiré au hasard. Chaque post X reçu laisse une ligne dans **📜 Activité → 🖥️ Logs** (`🐦 Post X de …`), avec son texte et ce que le bot en a fait. Quand le PC réclame, le téléphone lui transmet chaque code X (voir la [partie 9](#9-le-relais-avec-le-pc)).
 
 **1. Sur l'appli X**
 
@@ -366,7 +366,7 @@ Pense à mettre à jour le PC aussi (`npm install` si besoin, puis `npm start`).
 | L'app se ferme quand le bot redémarre | C'est normal si tu es sur l'écran de connexion Binance pendant une relance : rouvre-le. |
 | 🐦 Aucun post X dans **📡 Sources** | Vérifie, dans l'ordre : **Lire les posts X** activé, **Accès aux notifications** ✅, la cloche **Tous les posts** sur le compte dans l'appli X, et que les notifications de X s'affichent bien dans le volet. Puis **Batterie** de X sans restriction et démarrage auto de X dans Phone Master. |
 | 🐦 « Accès aux notifications » grisé | Android bloque ce réglage pour une app installée hors du Play Store : **Réglages** → **Applis** → **Red Packet Bot** → **⋮** → **Autoriser les paramètres restreints** (voir la [partie 7 bis](#7-bis-les-codes-publiés-sur-x-twitter)). |
-| 🐦 Post X vu, mais pas de code | Le code était peut-être dans une image, coupé par X (« … »), ou le compte n'est pas dans ta liste **Comptes X**. Avec **Logs détaillés (DEBUG)**, les logs montrent le texte reçu (« 🐦 Notification X de … »). |
+| 🐦 Post X vu, mais pas de code | Chaque post X reçu laisse une ligne dans **📜 Activité → 🖥️ Logs**, avec son texte et ce que le bot en a fait : `🐦 Post X de … : aucun code — « … »`. **🖼️ image non lue** : le code était peut-être dans l'image, que le bot ne lit pas. Un post absent des logs n'est jamais arrivé en notification (cloche, notifications de X). Sinon, le code était coupé par X (« … »), ou le compte n'est pas dans ta liste **Comptes X** (« ignoré (compte absent de X_ACCOUNTS) »). |
 | ⚠️ « Le PC ne prend pas les codes X » | Le PC n'est pas à jour : `git pull` sur le PC, puis relance-le. |
 | Logs trop longs à lire | Onglet **📜 Activité** → **🖥️ Logs** → **🗑️** : l'écran repart de zéro, le bot continue de tourner. |
 | Autre problème | Onglet **📜 Activité** → **🖥️ Logs** → **📤 Partager**, et envoie les dernières lignes. Pour une enquête plus poussée, le [guide de débogage](GUIDE-DEBOGAGE.md) explique comment laisser Claude examiner le téléphone par câble USB, et liste les problèmes déjà résolus. |

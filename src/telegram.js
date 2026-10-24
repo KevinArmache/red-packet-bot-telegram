@@ -168,18 +168,46 @@ const RE_RELAXED = /(?<![A-Z0-9])[A-Z0-9]{8}(?![A-Z0-9])/g;
 const RE_URL_PATH = /cryptobox[/=]([A-Za-z0-9]{6,20})/gi;
 // Paramètre explicite ?code=XXXXXXXX / &c=XXXXXXXX
 const RE_URL_PARAM = /[?&](?:code|c|cb)=([A-Za-z0-9]{8})(?![A-Za-z0-9])/gi;
-// Libellé explicite « Code : XXXXXXXX » dans plusieurs langues
-const RE_LABELLED =
-  /(?:code|codigo|código|codice|кода?|كود|码|コード)\s*[:：=＝\-–—]?\s*[`"'*_[(]*\s*([A-Za-z0-9]{8})(?![A-Za-z0-9])/gi;
+// Émojis, flèches et symboles (« 👉 », « ➡️ », « ⏩ », « ✅ »), en plages
+// explicites : le Node.js mobile du téléphone n'a pas les tables Unicode,
+// et y refuse `\p{…}` (« Invalid property name », bot arrêté le 24/10/2026).
+const EMOJI =
+  "[\\u{A9}\\u{AE}\\u{203C}\\u{2049}\\u{2122}\\u{2139}\\u{2190}-\\u{21FF}\\u{2300}-\\u{23FF}" +
+  "\\u{2460}-\\u{24FF}\\u{25A0}-\\u{27BF}\\u{2900}-\\u{297F}\\u{2B00}-\\u{2BFF}\\u{3030}\\u{303D}" +
+  "\\u{3297}\\u{3299}\\u{1F000}-\\u{1FAFF}]";
 
-// Code seul sur sa ligne (« OWUVALT5 », « 1. LJSSNXTT », « 🎁 LJSSNXTT ») : la
-// forme des listes de codes publiées sur X et dans beaucoup de canaux.
+// Libellé explicite « Code : XXXXXXXX » dans plusieurs langues. Entre les
+// deux : un numéro (« Code 2 : »), des flèches, des émojis (« Code 👉 »),
+// des guillemets. Le pluriel (« Codes 🎁 ») annonce une liste, pas un code.
+// Un code 100 % lettres doit y être en MAJUSCULES : « code tomorrow » n'est
+// pas un code.
+const RE_LABELLED = new RegExp(
+  "(?:code|c[oó]digo|codice|кода?|كود|رمز|کد|कोड|কোড|รหัส|코드|口令|码|コード|(?<![A-Za-z])(?:kode|kodu|kod|mã))" +
+    "\\s*#?\\d{0,2}" +
+    "(?:[\\s:：=＝\\-–—>«»“”‘’„\"'`*_\\[\\]()|•·]|" + EMOJI + "|\\uFE0F|\\u20E3)*" +
+    "([A-Za-z0-9]{8})(?![A-Za-z0-9])",
+  "giu",
+);
+
+// Code seul sur sa ligne (« OWUVALT5 », « 1. LJSSNXTT », « 1️⃣ LJSSNXTT »,
+// « 🎁 LJSSNXTT »), ou plusieurs codes et rien d'autre (« OWUVALT5 | LJSSNXTT ») :
+// la forme des listes de codes publiées sur X et dans beaucoup de canaux.
 // Numérotation et symboles autour sont ignorés ; le code reste en MAJUSCULES.
-const RE_LINE_NUMBER = /^\s*\d{1,2}\s*[.)\-–:]\s*/;
+const RE_LINE_NUMBER = /^\s*(?:\d{1,2}\s*[.)\-–:]|[0-9#*]\u{FE0F}?\u{20E3}|\u{1F51F})\s*/u;
 const RE_LINE_EDGES = /^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g;
 const RE_LINE_CODE = /^[A-Z0-9]{8}$/;
 // … et seulement dans un message qui annonce des codes
 const RE_CODE_CONTEXT = /red\s*packets?|cryptobox|\bcodes?\b|c[oó]digos?|🧧|🎁/i;
+
+// Code 100 % lettres au milieu d'une phrase (« Red packet LJSSNXTT vite ») :
+// option `inlineLetters`, pour X seulement (comptes suivis pour leurs codes).
+// Pris en MAJUSCULES, dans un post qui annonce des codes, et s'il a l'air
+// tiré au hasard : 2 voyelles au plus et une lettre rare (J K Q V W X Z). Les
+// mots (« STANDARD », « STRENGTH ») et les paires de trading (« LINKUSDT »)
+// restent écartés.
+const RE_INLINE_LETTERS = /(?<![A-Za-z0-9])[A-Z]{8}(?![A-Za-z0-9])/g;
+const RE_RARE_LETTER = /[JKQVWXZ]/;
+const RE_TRADING_PAIR = /(?:USDT|USDC|BUSD|TUSD|USD|EUR|TRY|BTC|ETH|BNB)$/;
 
 // Exclure les messages destinés à d'autres plateformes si Binance n'est pas mentionné
 const IGNORED_EXCHANGES =
@@ -198,10 +226,17 @@ const STOPWORDS = new Set([
   // Mots des listes de codes (X, canaux) : seuls sur une ligne, en majuscules
   "AIRDROPS", "FOLLOWUS", "GOODLUCK", "GIFTCODE", "REDPACKS", "CODELIST",
   "NEWCODES", "ALLCODES", "LISTINGS", "BULLRUNS", "DAILYBOX", "FREEBOXS",
+  // Mots en majuscules des posts crypto et des annonces
+  "BREAKING", "BITCOINS", "ALTCOINS", "DOGECOIN", "TRENDING", "OFFICIAL",
+  "REMINDER", "UPCOMING", "ANNOUNCE", "LAUNCHED", "CONGRATS", "THANKYOU",
+  "TOMORROW", "TOGETHER", "RETWEETS", "COMMENTS", "FOLLOWER", "MILLIONS",
+  "STANDARD", "SNAPSHOT", "UNLOCKED", "DEADLINE", "PROTOCOL", "SURPRISE",
+  "THURSDAY", "SATURDAY", "FEBRUARY", "NOVEMBER", "DECEMBER",
   // Français
   "NOUVEAUX", "NOUVELLE", "TOUJOURS", "PARTAGER", "GAGNANTS", "MONTANTS",
   "PATIENCE", "ENSEMBLE", "PERSONNE", "RESULTAT", "GRATUITE", "PREMIERE",
-  "DERNIERE", "REJOINDR", "FELICITE", "CADEAUXX", "MERCIIII",
+  "DERNIERE", "REJOINDR", "FELICITE", "CADEAUXX", "MERCIIII", "NOVEMBRE",
+  "DECEMBRE",
 ]);
 
 const VOWELS = /[AEIOUY]/g;
@@ -233,6 +268,24 @@ function isPlausibleCode(code, relaxed) {
   return true;
 }
 
+/** Message visiblement destiné à un autre exchange (Bybit, OKX…) ? */
+function isOtherExchange(plain) {
+  return IGNORED_EXCHANGES.test(plain) && !/binance|cryptobox/i.test(plain);
+}
+
+/** Code 100 % lettres qui a l'air tiré au hasard (règle `inlineLetters`). */
+function looksRandomLetters(code) {
+  return (code.match(VOWELS) ?? []).length <= 2 && RE_RARE_LETTER.test(code) && !RE_TRADING_PAIR.test(code);
+}
+
+/** Codes d'une ligne qui n'est faite que de codes, sinon []. */
+function lineCodes(line) {
+  const bare = line.replace(RE_LINE_NUMBER, "").replace(RE_LINE_EDGES, "");
+  if (RE_LINE_CODE.test(bare)) return [bare];
+  const parts = bare.split(/[^A-Za-z0-9]+/);
+  return parts.length >= 2 && parts.every((part) => RE_LINE_CODE.test(part)) ? parts : [];
+}
+
 /**
  * Extrait les codes d'un message pré-découpé en sources.
  *
@@ -243,8 +296,10 @@ function isPlausibleCode(code, relaxed) {
  * Binance devient faible.
  *
  * @param {{ plain: string, trusted: string[] }} sources
- * @param {{ includeKnown?: boolean }} [options] - includeKnown : ne pas écarter
- *   les codes déjà traités (l'appelant les compte lui-même).
+ * @param {{ includeKnown?: boolean, inlineLetters?: boolean }} [options]
+ *   includeKnown : ne pas écarter les codes déjà traités (l'appelant les
+ *   compte lui-même). inlineLetters : codes 100 % lettres pris aussi au
+ *   milieu d'une phrase (posts X).
  * @returns {{ code: string, source: 'monospace'|'lien'|'label'|'texte' }[]}
  *   Codes uniques, jamais encore traités.
  */
@@ -255,9 +310,7 @@ function extractCodes(sources, options = {}) {
   if (!plain && sources.trusted.length === 0) return [];
 
   // Message visiblement destiné à un autre exchange → on ignore
-  if (IGNORED_EXCHANGES.test(plain) && !/binance|cryptobox/i.test(plain)) {
-    return [];
-  }
+  if (isOtherExchange(plain)) return [];
 
   /** code → source (la première trouvée est la plus sûre) */
   const found = new Map();
@@ -281,21 +334,21 @@ function extractCodes(sources, options = {}) {
   for (const m of plain.matchAll(RE_URL_PARAM)) add(m[1], true, "lien");
 
   // 3. Codes explicitement étiquetés « Code : XXXXXXXX » — niveau souple
-  for (const m of plain.matchAll(RE_LABELLED)) add(m[1], true, "label");
+  for (const m of plain.matchAll(RE_LABELLED)) {
+    if (/\d/.test(m[1]) || m[1] === m[1].toUpperCase()) add(m[1], true, "label");
+  }
 
   // 4. Code seul sur sa ligne — niveau souple : les codes 100 % lettres
   //    (« LJSSNXTT », « PABVFEBL ») ne sont plus ratés. Seulement dans un
   //    message qui annonce des codes, qui n'est QU'une liste de codes, ou qui
   //    contient déjà un vrai code (lettres + chiffres) seul sur sa ligne.
   //    Source « texte » : l'anti-blocage le traite comme du texte libre.
-  const lines = plain.split("\n").filter((line) => line.trim());
-  const tokens = lines
-    .map((line) => line.replace(RE_LINE_NUMBER, "").replace(RE_LINE_EDGES, ""))
-    .filter((token) => RE_LINE_CODE.test(token));
+  const perLine = plain.split("\n").filter((line) => line.trim()).map(lineCodes);
+  const tokens = perLine.flat();
   if (
     tokens.length > 0 &&
     (RE_CODE_CONTEXT.test(plain) ||
-      tokens.length === lines.length ||
+      perLine.every((codes) => codes.length > 0) ||
       tokens.some((token) => isPlausibleCode(token, false)))
   ) {
     for (const token of tokens) add(token, true, "texte");
@@ -303,6 +356,13 @@ function extractCodes(sources, options = {}) {
 
   // 5. Texte libre — niveau strict (lettres + chiffres obligatoires)
   for (const m of plain.toUpperCase().matchAll(RE_STRICT)) add(m[0], false, "texte");
+
+  // 6. Posts X : code 100 % lettres au milieu d'une phrase (voir RE_INLINE_LETTERS)
+  if (options.inlineLetters && RE_CODE_CONTEXT.test(plain)) {
+    for (const m of plain.matchAll(RE_INLINE_LETTERS)) {
+      if (looksRandomLetters(m[0])) add(m[0], true, "texte");
+    }
+  }
 
   return [...found].map(([code, source]) => ({ code, source }));
 }
@@ -1029,6 +1089,7 @@ module.exports = {
   isAuthDeadError,
   extractCodes,
   isPlausibleCode,
+  isOtherExchange,
   buildMessageSources,
   // Exposés pour les tests
   authenticate,

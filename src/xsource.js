@@ -27,7 +27,7 @@ const logger = require("./logger");
 const stats = require("./stats");
 const history = require("./history");
 const notifier = require("./notifier");
-const { extractCodes, isPlausibleCode } = require("./telegram");
+const { extractCodes, isPlausibleCode, isOtherExchange } = require("./telegram");
 
 const truthy = (raw, fallback) => {
   const value = String(raw ?? "").trim().toLowerCase();
@@ -112,8 +112,10 @@ function parsePost(data, options = {}) {
     .filter((u) => /^https?:\/\//i.test(u));
   const text = pieces.join("\n").slice(0, MAX_TEXT);
   const postedAt = Number(data.postedAt);
+  // Post avec image (BigPictureStyle) : l'image elle-même n'est pas lue
+  const picture = data.picture === true;
   if (!Number.isFinite(postedAt) || postedAt <= 0) return null;
-  if (!text && urls.length === 0) return null;
+  if (!text && urls.length === 0 && !picture) return null;
 
   const when = Number(data.when);
   return {
@@ -123,6 +125,7 @@ function parsePost(data, options = {}) {
     subText: asText(data.subText),
     text,
     urls,
+    picture,
     postedAt,
     when: Number.isFinite(when) && when > 0 ? when : 0,
     update: data.update === true,
@@ -169,16 +172,28 @@ function matchAccount(post, accounts) {
 }
 
 /**
- * Post assez récent ? (notification ré-affichée après coup, réveil du téléphone…)
+ * Pourquoi un post est trop vieux pour être réclamé (notification ré-affichée
+ * après coup, réveil du téléphone…), ou '' s'il est récent.
  * @param {{ postedAt: number, when: number }} post
  */
-function isFresh(post, now, maxAgeMs, startedAt) {
+function staleReason(post, now, maxAgeMs, startedAt) {
   // `when` peut être l'heure du post lui-même : on garde la plus ancienne des
   // deux si elle est plausible (jamais dans le futur de postedAt)
   const stamp = post.when && post.when <= post.postedAt + 5000 ? Math.min(post.when, post.postedAt) : post.postedAt;
-  if (startedAt && stamp < startedAt) return false;
-  if (maxAgeMs > 0 && now - stamp > maxAgeMs) return false;
-  return true;
+  if (startedAt && stamp < startedAt) return "publié avant le démarrage du bot";
+  if (maxAgeMs > 0 && now - stamp > maxAgeMs) return `publié il y a ${Math.round((now - stamp) / 1000)} s`;
+  return "";
+}
+
+/** Post assez récent ? */
+function isFresh(post, now, maxAgeMs, startedAt) {
+  return !staleReason(post, now, maxAgeMs, startedAt);
+}
+
+/** Texte d'un post sur une seule ligne, pour les logs (« … ⏎ … »). */
+function excerpt(text, max = 200) {
+  const flat = String(text ?? "").trim().replace(/\s*\n\s*/g, " ⏎ ").replace(/[ \t]+/g, " ");
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
 /**
@@ -198,11 +213,13 @@ function cleanTweet(text) {
 
 /**
  * Codes d'un post (règles de src/telegram.js, aucun segment monospace sur X).
+ * Les comptes X sont suivis pour leurs codes : un code 100 % lettres y est
+ * pris aussi au milieu d'une phrase (inlineLetters).
  * @param {{ includeKnown?: boolean }} [options] - garder les codes déjà traités
  */
 function extractFromPost(post, options = {}) {
   const plain = [cleanTweet(post.text), ...post.urls].filter(Boolean).join("\n");
-  return extractCodes({ plain, trusted: [] }, options);
+  return extractCodes({ plain, trusted: [] }, { ...options, inlineLetters: true });
 }
 
 /**
@@ -224,14 +241,16 @@ function formatXCode({ code, source, from, at, inst, dry }) {
 
 /**
  * Lit un message « #xcode » (première ligne seulement), ou null s'il est mal
- * formé. Le code est revérifié (codes BP, 8 chiffres…).
+ * formé. Le code est revérifié (codes BP, 8 chiffres, mots courants…) au
+ * niveau souple : un code 100 % lettres trouvé seul sur sa ligne arrive en
+ * src=texte, et le PC doit le prendre comme le téléphone.
  */
 function parseXCode(text) {
   const first = String(text ?? "").split("\n", 1)[0].trim();
   const m = XCODE_RE.exec(first);
   if (!m) return null;
   const [, code, source, from, at, inst, dry] = m;
-  if (!isPlausibleCode(code, source !== "texte")) return null;
+  if (!isPlausibleCode(code, true)) return null;
   return { code, source, from: from === "-" ? null : from, at: Number(at), inst, dry: Boolean(dry) };
 }
 
@@ -305,15 +324,23 @@ function handlePost(data) {
   onPost?.(`🐦 ${from}`);
 
   if (IS_DEBUG) {
-    logger.debug(`🐦 Notification X de ${from} : ${post.text.replace(/\s+/g, " ").slice(0, 200)}`);
+    logger.debug(`🐦 Notification X de ${from} : ${post.text.replace(/\s+/g, " ")}`);
   }
 
-  if (!isFresh(post, Date.now(), MAX_AGE_MS, state.startedAt)) {
-    logger.debug(`🐦 Post X de ${from} trop ancien — ignoré`);
+  // Une ligne par post X reçu, avec son texte : on voit ce que le bot a lu,
+  // et pourquoi il n'a rien réclamé
+  const quote = post.text
+    ? `« ${excerpt(post.text)} »`
+    : post.picture ? "(image seule, sans texte) · 🖼️ image non lue" : `« ${excerpt(post.urls.join(" "))} »`;
+  const picture = post.picture && post.text ? " · 🖼️ image non lue" : "";
+
+  const stale = staleReason(post, Date.now(), MAX_AGE_MS, state.startedAt);
+  if (stale) {
+    logger.info(`🐦 Post X de ${from} ignoré (${stale}) — ${quote}`);
     return;
   }
   if (!matchAccount(post, ACCOUNTS)) {
-    logger.debug(`🐦 Post X de ${from} : compte absent de X_ACCOUNTS — ignoré`);
+    logger.info(`🐦 Post X de ${from} ignoré (compte absent de X_ACCOUNTS) — ${quote}`);
     return;
   }
 
@@ -323,13 +350,16 @@ function handlePost(data) {
   const known = found.filter(({ code }) => history.hasCode(code) || history.isProcessing(code)).length;
   state.lastFound = found.length;
   state.lastKnown = known;
-  if (known > 0) {
+  if (found.length === 0) {
+    const why = isOtherExchange(cleanTweet(post.text)) ? "post d'un autre exchange" : "aucun code";
+    logger.info(`🐦 Post X de ${from} : ${why}${picture} — ${quote}`);
+  } else if (known > 0) {
     logger.info(
       `🐦 Post X de ${from} : ${known === found.length ? "" : `${known} sur ${found.length} `}` +
-        `code(s) déjà traité(s) plus tôt (Telegram ou X) — rien à refaire`,
+        `code(s) déjà traité(s) plus tôt (Telegram ou X) — rien à refaire — ${quote}`,
     );
-  } else if (found.length === 0) {
-    logger.debug(`🐦 Post X de ${from} : aucun code`);
+  } else {
+    logger.info(`🐦 Post X de ${from} : ${found.length} code(s) — ${quote}`);
   }
 
   for (const { code, source } of found) {
@@ -498,6 +528,8 @@ module.exports = {
   accountLabel,
   matchAccount,
   isFresh,
+  staleReason,
+  excerpt,
   cleanTweet,
   extractFromPost,
   routeFor,

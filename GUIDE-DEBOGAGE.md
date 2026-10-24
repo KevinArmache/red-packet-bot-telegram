@@ -653,7 +653,7 @@ Ajouté en octobre 2026. Il n'existe pas d'API X gratuite pour lire les posts, e
 
 1. **`XNotificationListener`** (Kotlin, processus `:bot`) reçoit chaque notification du téléphone. Il ignore tout ce qui ne vient pas de `com.twitter.android`, ainsi que les résumés de groupe et les notifications permanentes. Il garde le titre, `text`, `bigText`, les lignes, les messages et les liens cachés (`URLSpan`). Une notification déjà transmise avec le même texte est ignorée pendant 15 min.
 2. Il appelle `BotService.onXNotification()`, qui l'envoie à Node par le pont (message `x.post`). Si le bot ne tourne pas, la notification est comptée (`dropped`) et oubliée : elle serait périmée au démarrage.
-3. **`src/xsource.js`** (Node) vérifie la fraîcheur (`MAX_MESSAGE_AGE_S`, et rien d'antérieur au démarrage), la liste `X_ACCOUNTS`, nettoie le texte (@mentions, #hashtags, $cashtags, liens t.co, mot coupé par « … »), puis extrait les codes avec **les règles de Telegram** (`extractCodes`).
+3. **`src/xsource.js`** (Node) vérifie la fraîcheur (`MAX_MESSAGE_AGE_S`, et rien d'antérieur au démarrage), la liste `X_ACCOUNTS`, nettoie le texte (@mentions, #hashtags, $cashtags, liens t.co, mot coupé par « … »), puis extrait les codes avec **les règles de Telegram** (`extractCodes`), plus une règle propre à X : un code 100 % lettres au milieu d'une phrase (`inlineLetters`). **Chaque post reçu laisse une ligne `🐦 Post X de …` dans les logs**, avec son texte et ce que le bot en a fait.
 4. Qui réclame :
    - téléphone `solo`, ou responsable en ce moment : il réclame lui-même (`handleDetectedCode`) ;
    - sinon : message silencieux `#xcode CODE src=… from=@compte at=… inst=…` dans les Messages enregistrés. Le PC le lit (`xsource.handleSelfMessage`) et les **deux** appareils jugent sur la date serveur Telegram de ce message (`relay.canClaim`), comme pour un code de canal. Un `#xcode` de plus de 30 s, édité ou mal formé est ignoré. Le téléphone le supprime après 10 min.
@@ -666,6 +666,7 @@ Le PC annonce qu'il prend les codes X par le jeton ` x=1` de sa ligne `#botrelay
 1. **⚙️ Réglages** → **🐦 X** → **Essai à blanc** (`X_DRY_RUN=true`) : tout tourne, mais rien n'est tapé sur Binance (« 🧪 Essai à blanc » dans les logs, statut 🧪 dans **📜 Activité**). Le code n'est pas mémorisé : il peut resservir.
 2. Notification de test par câble (acceptée **seulement** en essai à blanc) :
    `adb shell cmd notification post -S bigtext -t "Binance" xtest "Red Packet 🎁 Code : AB12CD34"`
+   Pour la retirer ensuite : `adb shell am force-stop com.android.shell`.
 3. Sur le PC, un `#xcode` tapé à la main dans les Messages enregistrés doit donner 🎁 puis 🧪 :
    `#xcode AB12CD34 src=label from=@test at=1800000000000 inst=00000000 dry=1` (remplace `at` par l'heure actuelle en millisecondes ; le bot juge sur la date du message).
 
@@ -723,9 +724,47 @@ adb shell cmd notification allow_listener com.redpacketbot.app/com.redpacketbot.
   - repassés en INFO : attente normale dans la file (moins de 30 s), FLOOD_WAIT de l'indexation des canaux (repli qui marche), arrêt propre, refus « épuisé » ou « déjà pris » ;
   - canaux introuvables : la cause et quoi faire (« n'existe pas », « compte personnel », « canal privé »).
 
+### Résolu : « je rate beaucoup de posts X, ils sont tous différents » (24 octobre 2026)
+
+**Le symptôme.** Peu de codes venus de X, alors que les comptes suivis avec la cloche publient beaucoup, et chacun à sa façon : un code, plusieurs, ou rien à voir avec les Red Packets.
+
+**Le diagnostic.**
+
+- **La lecture était juste, mais muette.** 156 posts X reçus en 26 h, 15 codes, et tous les codes X tentés étaient bons (gagnés, un seul épuisé). Les 141 posts sans code ne laissaient aucune trace sans DEBUG : impossible de savoir ce qui manquait.
+- **Les ratés du matin venaient de Binance.** Les codes X trouvés à 05:51 et 09:51 (8UAXEAF2, 9ZCI6F4C) ont été sautés par l'arrêt anti-blocage, causé par la fenêtre « Déconnecté » ([partie 9 bis](#9-bis-résolu--des-codes-valides-comptés-comme-faux-fenêtre--déconnecté--de-binance)).
+- **Android ne masque pas les codes sur ce téléphone.** Notifications de test par adb, y compris « Your verification code is 123456 » : `mSensitiveContent=false` partout dans `dumpsys notification --noredact`. L'assistant de notifications actif est `com.google.android.ext.services`.
+- **HiOS gèle l'appli X**, mais la dégèle pour chaque push : `cgroup.freeze` de son UID à `1`, `is_frozen … frozen:netUp`, puis `unfreeze uid: … com.twitter.android … reason:broadcast cpninfo:com.google.android.c2dm.intent.RECEIVE`. Les notifications arrivent donc, même écran éteint (6 codes X gagnés à 03:23).
+- **Formats que les règles rataient** : « Code 👉 X », numéros en émoji (« 1️⃣ X »), plusieurs codes sur une ligne, code 100 % lettres au milieu d'une phrase, « Code : » dans d'autres langues. Et un faux code : « code: tomorrow » était lu `TOMORROW`.
+- **Bug du relais** : un code 100 % lettres trouvé seul sur sa ligne par le téléphone part en `#xcode … src=texte`, et le PC le refusait (contrôle strict lettres + chiffres).
+
+**La solution.**
+
+- Règles élargies (`src/telegram.js`, détail dans le [README](README.md#deux-niveaux-de-confiance)) : libellés en plusieurs langues, numéro, flèches et émojis entre « Code » et le code ; numéros en émoji ; plusieurs codes sur une ligne. Sur X seulement, code 100 % lettres dans une phrase s'il a l'air tiré au hasard. Après « Code : », un code 100 % lettres doit être en majuscules.
+- **Une ligne par post X**, en INFO :
+  - `🐦 Post X de MS Airdrop King 👑 : 1 code(s) — « … »`, suivie des lignes `🎁 Code trouvé` ;
+  - `🐦 Post X de TKdesigner 🎨👑 : aucun code — « Landlords in Nigeria … »` ;
+  - `🐦 Post X de … : aucun code · 🖼️ image non lue — « … »` : le code était peut-être dans l'image ;
+  - `🐦 Post X de … ignoré (publié il y a 240 s) — « … »`, ou `(compte absent de X_ACCOUNTS)`.
+- Posts « image seule » : l'écouteur les transmet maintenant (`picture`), au lieu de les jeter faute de texte.
+- Le PC accepte les `#xcode … src=texte` d'un code 100 % lettres (mots courants toujours refusés).
+
+**La vérification.** `npm run test:guard` (198 vérifications, dont les pièges : vrais mots en majuscules, paires de trading, « code tomorrow »). Sur 24 posts écrits pour l'occasion, l'ancienne lecture en lisait 17 correctement, la nouvelle 24.
+
+**À faire avec le journal.** Après quelques jours, compte ce qui reste raté :
+
+```bash
+adb shell "dumpsys -t 90 activity service com.redpacketbot.app/.BotService logs 5000 | grep -c '🐦 Post X'"
+adb shell "dumpsys -t 90 activity service com.redpacketbot.app/.BotService logs 5000 | grep '🐦 Post X' | grep -c 'image non lue'"
+adb shell "dumpsys -t 90 activity service com.redpacketbot.app/.BotService logs 5000 | grep '🐦 Post X' | grep 'aucun code'"
+```
+
+- **Beaucoup de `🖼️ image non lue`** : la prochaine étape est de lire le texte des images sur le téléphone (ML Kit, sans Internet ni frais).
+- **Des codes dans les textes « aucun code »** : ajouter le format aux règles, avec un test.
+
 ### Le format réel des notifications de X (relevé du 15 octobre 2026, X 12.33)
 
 - Canal `<id de ton compte>-tweet_notifications_silent`. Un résumé de groupe (`GROUP_SUMMARY`, sans texte) accompagne les posts : il est ignoré.
+- Une seule notification pour tous les posts (relevé du 24/10) : même clé `notification://com.twitter.android?user_id=<ton compte>`, id 0. Chaque post remplace le texte du précédent (`number=2`). L'écouteur transmet chaque nouveau texte une fois.
 - `android.title` = **nom affiché** du compte (« Sloomo », « Red Packet Code Gift 🧧 »), jamais le @pseudo. `android.subText` = **ton** compte X (« redpacketrdc ») : jamais pris pour l'auteur.
 - Post texte : `BigTextStyle`, texte complet dans `android.text` et `android.bigText`. Post avec image : `BigPictureStyle`, texte dans `android.text` et `android.summaryText` ; vide si le post n'est qu'une image.
 - `when` = heure d'arrivée de la notification, quasi immédiate (1 à 2 s après la publication, mesuré par `posttimeElapsedMs`).
@@ -741,10 +780,22 @@ Le format des notifications de X peut changer à chaque mise à jour de l'appli.
 - le canal (`channel=`) des posts suivis par cloche, comparé à celui des suggestions.
 
 > [!WARNING]
-> **Android 15 et plus peut masquer les codes à usage unique** (codes de connexion) dans les notifications transmises aux applis comme Red Packet Bot. `dumpsys --noredact` montre le vrai texte, pas ce que l'app reçoit. Pour le vérifier : **Logs détaillés (DEBUG)** + essai à blanc, puis compare la ligne « 🐦 Notification X de … » des logs avec `dumpsys`. Si le texte y est remplacé, il n'existe pas de contournement propre : la permission qui lève ce masquage est réservée aux applis système.
+> **Android 15 et plus peut masquer les codes à usage unique** (codes de connexion) dans les notifications transmises aux applis comme Red Packet Bot. `dumpsys --noredact` montre le vrai texte, pas ce que l'app reçoit. Si le texte est remplacé, il n'existe pas de contournement propre : la permission qui lève ce masquage est réservée aux applis système.
+>
+> **Vérifié le 24/10/2026 sur le Camon 40 (Android 16) : aucun masquage.** Pour le revérifier après une mise à jour d'Android, poste une notification de test puis lis son drapeau (`true` = masquée pour l'app) :
+>
+> ```bash
+> adb shell "cmd notification post -S bigtext -t 'Test' t7 'Your verification code is 123456'"
+> adb shell "dumpsys notification --noredact | grep -A120 'tag=t7 ' | grep -m1 mSensitiveContent"
+> adb shell am force-stop com.android.shell     # retire les notifications de test (« cmd notification » n'a pas de commande pour ça)
+> ```
+>
+> Ce masquage a un interrupteur, `cmd notification redact_otp_from_untrusted_listeners false`. Ne l'utilise qu'en connaissance de cause : il rendrait aussi les codes de ta banque lisibles par toutes les applis qui lisent les notifications.
 
 ### Pièges pour qui modifie l'app
 
 - **Garder l'écouteur dans le processus `:bot`** (manifeste) : il joint ainsi `BotService.instance` directement, comme l'écran de connexion Binance. Une autre voie (Intent vers le service) relancerait le service au premier plan à chaque notification.
 - Android lie l'écouteur tout seul : il **recrée le processus `:bot`** même bot arrêté. C'est sans effet (Node ne démarre que par `launchNode`), mais `pidof com.redpacketbot.app:bot` ne prouve plus que le bot tourne.
 - Les textes de `Status.describe()` (titres de la notification) sont repris dans GUIDE-ANDROID.md : ne les change pas sans mettre le guide à jour.
+- **Pas de `\p{…}` dans les expressions régulières du bot.** Le Node.js mobile du téléphone (18.20.4) n'a pas les tables Unicode : il refuse `\p{Extended_Pictographic}` (« Invalid property name ») et le bot ne démarre plus, alors que le Node.js du PC l'accepte. C'est arrivé le 24/10/2026 : le bot est resté arrêté 18 min après une mise à jour (`💀 Démarrage du bot impossible : SyntaxError` dans `logcat -s RedPacketBot-node`). Écris les plages de caractères à la main (`EMOJI` dans `src/telegram.js`). `npm run test:guard` le vérifie.
+- **Après chaque installation, vérifie que le bot a démarré** : `adb shell dumpsys activity service com.redpacketbot.app/.BotService` doit répondre (`No services match` = bot arrêté), puis `adb shell "logcat -d -s RedPacketBot-node:*"` pour la cause.

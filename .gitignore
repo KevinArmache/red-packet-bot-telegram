@@ -26,6 +26,7 @@ npm-debug.log*
 
 # App Android : compilation, Node.js mobile téléchargé, APK produite
 android/.gradle/
+android/.kotlin/
 android/build/
 android/app/build/
 android/app/.cxx/

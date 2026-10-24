@@ -157,12 +157,19 @@ class XNotificationListener : NotificationListenerService() {
             addAll(lines)
             messages.forEach { m -> m.text?.let(::add) }
         }
-        if (body.all { it.isBlank() }) return
+        // Post avec image : signalé au bot (l'image n'est pas lue), même sans texte
+        val picture = extras.getString(Notification.EXTRA_TEMPLATE) == Notification.BigPictureStyle::class.java.name ||
+            extras.containsKey(Notification.EXTRA_PICTURE) ||
+            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && extras.containsKey(Notification.EXTRA_PICTURE_ICON))
+        if (body.all { it.isBlank() } && !picture) return
 
         // La même notification revient souvent (mise à jour, regroupement) :
         // transmise une fois par texte
         val now = System.currentTimeMillis()
-        val dedupKey = "${sbn.key}|${body.joinToString("\n").hashCode()}"
+        // X garde la même clé pour tous les posts : deux images sans texte ne
+        // se distinguent que par leur heure
+        val imageOnly = if (body.all { it.isBlank() }) "|${notification.`when`}" else ""
+        val dedupKey = "${sbn.key}|${body.joinToString("\n").hashCode()}$imageOnly"
         seen.entries.removeAll { now - it.value > DEDUP_MS }
         if (seen.containsKey(dedupKey)) return
         val update = seen.keys.any { it.startsWith("${sbn.key}|") }
@@ -192,6 +199,7 @@ class XNotificationListener : NotificationListenerService() {
                 }),
             )
             .put("urls", JSONArray(urls))
+            .put("picture", picture)
             .put("postedAt", sbn.postTime)
             .put("when", notification.`when`)
             .put("update", update)

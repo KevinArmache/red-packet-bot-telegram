@@ -508,8 +508,11 @@ Le bot analyse **toutes** les surfaces d'un message :
 Les Red Packets Binance font exactement **8 caractères alphanumériques**.
 
 - **Strict**, pour le texte libre : le code doit mélanger lettres **et** chiffres. Sinon, n'importe quel mot de 8 lettres deviendrait un faux positif.
-- **Souple**, seulement pour les sources fiables : blocs `monospace`, « Code : XXXXXXXX » (aussi en espagnol, italien, russe, arabe, chinois, japonais), adresses `cryptobox/…` et paramètres `?code=`. Il accepte aussi les codes **100 % alphabétiques**, environ 10 % des Red Packets. Une liste noire de mots courants et un test de voyelles écartent les vrais mots.
-- **Code seul sur sa ligne**, en MAJUSCULES (« LJSSNXTT », « 1. PABVFEBL », « 🎁 PABVFEBL ») : niveau souple aussi, mais seulement si le message annonce des codes (« red packet », « code », 🎁, 🧧…), n'est qu'une liste de codes, ou contient déjà un autre code lettres + chiffres seul sur sa ligne. C'est la forme des listes publiées sur X et dans beaucoup de canaux. Ces codes restent classés « texte libre » pour l'anti-blocage.
+- **Souple**, seulement pour les sources fiables : blocs `monospace`, « Code : XXXXXXXX », adresses `cryptobox/…` et paramètres `?code=`. Il accepte aussi les codes **100 % alphabétiques**, environ 10 % des Red Packets. Une liste noire de mots courants et un test de voyelles écartent les vrais mots.
+  - « Code : » se lit en plusieurs langues (espagnol, italien, turc, indonésien, vietnamien, russe, arabe, persan, hindi, thaï, coréen, chinois « 口令 », japonais), avec un numéro (« Code 2 : »), des flèches ou des émojis entre les deux (« Code 👉 », « Code ➡️ »).
+  - Après « Code : », un code 100 % lettres doit être en MAJUSCULES : « code tomorrow » n'est pas un code.
+- **Code seul sur sa ligne**, en MAJUSCULES (« LJSSNXTT », « 1. PABVFEBL », « 1️⃣ PABVFEBL », « 🎁 PABVFEBL »), ou **plusieurs codes et rien d'autre** sur une ligne (« OWUVALT5 | LJSSNXTT ») : niveau souple aussi, mais seulement si le message annonce des codes (« red packet », « code », 🎁, 🧧…), n'est qu'une liste de codes, ou contient déjà un autre code lettres + chiffres seul sur sa ligne. C'est la forme des listes publiées sur X et dans beaucoup de canaux. Ces codes restent classés « texte libre » pour l'anti-blocage.
+- **Posts X seulement : un code 100 % lettres au milieu d'une phrase** (« Red packet LJSSNXTT vite ») est pris si le post annonce des codes, s'il est en MAJUSCULES, et s'il a l'air tiré au hasard : 2 voyelles au plus et une lettre rare (J, K, Q, V, W, X ou Z). Les vrais mots (« STANDARD », « BREAKING ») et les paires de trading (« LINKUSDT ») restent écartés. Sur Telegram, les canaux publient leurs codes en monospace : cette règle n'y sert pas.
 
 **Toujours rejetés :**
 
