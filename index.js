@@ -25,6 +25,7 @@ const stats = require("./src/stats");
 const history = require("./src/history");
 const queue = require("./src/queue");
 const notifier = require("./src/notifier");
+const publisher = require("./src/publisher");
 const relay = require("./src/relay");
 const antiban = require("./src/antiban");
 const activity = require("./src/activity");
@@ -34,6 +35,8 @@ const binance = require("./src/binance");
 const { startTelegramClient, loginTelegram, isAuthDeadError } = require("./src/telegram");
 
 const SETUP_MODE = process.argv.includes("--setup");
+// npm run channel [-- --title "…" --username pseudo] : crée ton canal de gains
+const CHANNEL_MODE = process.argv.includes("--channel");
 const UNATTENDED = ["1", "true"].includes(
   String(process.env.BOT_UNATTENDED ?? "").toLowerCase(),
 );
@@ -90,7 +93,12 @@ function parseTargetChannels() {
 // ─── Bilan périodique ────────────────────────────────────────────────────────
 
 function printStats(title = "📊 Bilan d'activité") {
-  const { rows } = stats.snapshot([...xsource.statsRows(), ...antiban.statsRows(), ...relay.statsRows()]);
+  const { rows } = stats.snapshot([
+    ...xsource.statsRows(),
+    ...publisher.statsRows(),
+    ...antiban.statsRows(),
+    ...relay.statsRows(),
+  ]);
   logger.blank();
   logger.table(title, rows, logger.colors.cyan);
   logger.blank();
@@ -675,6 +683,8 @@ function handleDetectedCode(code, meta = {}) {
               (meta.channel ? ` (${meta.channel})` : ""),
             { level: "all" },
           );
+          // Ton canal : le code pour tes abonnés, tout de suite (jamais bloquant)
+          publisher.publish({ code, gain: result.gain, gainUsd: result.gainUsd });
           break;
 
         case "permanent_failure":
@@ -803,6 +813,8 @@ function setupGlobalErrorHandlers() {
       logger.info(`⏳ ${queue.size} code(s) encore en file — on les termine...`);
       await Promise.race([queue.drain(), new Promise((r) => setTimeout(r, 15000))]);
     }
+    // Gains pas encore publiés sur ton canal : 8 s pour partir
+    await Promise.race([publisher.flush(), sleep(8000)]);
 
     printStats("📊 Bilan final");
     activity.flush();
@@ -861,6 +873,92 @@ async function runSetup() {
   process.exit(0);
 }
 
+// ─── Ton canal de gains (📣) ─────────────────────────────────────────────────
+
+/** Le bot peut-il écrire dans ton canal ? Vérifié sans rien publier ; l'app affiche le résultat. */
+async function checkPublishing() {
+  const result = await publisher.check();
+  globalThis.__rpbHost?.event("publish_check_result", { ...result, channel: publisher.channel() });
+}
+
+/** Boutons de l'app (⚙️ Réglages → 📣) : créer ton canal, revérifier. */
+function listenPublishCommands() {
+  const host = globalThis.__rpbHost;
+  if (!host) return;
+  host.on("publish_check", () => void checkPublishing());
+  host.on("publish_setup", async (wanted) => {
+    const result = await publisher
+      .setupChannel(telegram, wanted)
+      .catch((err) => ({ ok: false, channel: "", text: `Canal non créé : ${err.message}` }));
+    host.event("publish_setup_result", result);
+  });
+}
+
+/** Valeur d'une option de la ligne de commande (« --title Mon canal »). */
+function argValue(name) {
+  const at = process.argv.indexOf(name);
+  return at > 0 ? process.argv[at + 1] : undefined;
+}
+
+/** Écrit (ou remplace) CLÉ=valeur dans le .env du PC. */
+function saveEnvValue(key, value) {
+  const file = path.join(__dirname, ".env");
+  let text = "";
+  try {
+    text = fs.readFileSync(file, "utf-8");
+  } catch (_) {
+    /* pas encore de .env */
+  }
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const line = `${key}=${value}`;
+  const existing = new RegExp(`^${key}=.*$`, "m");
+  text = existing.test(text)
+    ? text.replace(existing, line)
+    : `${text.replace(/\s*$/, "")}${eol}${eol}# 📣 Ton canal de gains (créé par npm run channel)${eol}${line}${eol}`;
+  fs.writeFileSync(file, text);
+  logger.success(`💾 .env mis à jour : ${line}`);
+}
+
+/** npm run channel : ton compte crée le canal, ton bot d'alertes y publiera. */
+async function runChannelSetup() {
+  logger.blank();
+  logger.banner(
+    ["📣 Ton canal de gains — création et réglage", "Ton compte crée le canal, ton bot d'alertes y publie"],
+    logger.colors.cyan,
+  );
+  logger.blank();
+  validateEnv();
+
+  if (publisher.channel()) {
+    logger.info(`📣 Canal déjà réglé dans .env : PUBLISH_CHANNEL=${publisher.channel()}`);
+    const { ok } = await publisher.check();
+    // Pas de process.exit() juste après un fetch : Node 24 plante sous Windows
+    // (« Assertion failed … async.c ») ; le processus s'arrête tout seul
+    process.exitCode = ok === false ? 1 : 0;
+    return;
+  }
+
+  logger.rule("📡 Telegram");
+  const { tg } = await loginTelegram();
+  const result = await publisher.setupChannel(tg, {
+    title: argValue("--title"),
+    username: argValue("--username"),
+  });
+  await tg.destroy().catch(() => {});
+  if (result.channel) saveEnvValue("PUBLISH_CHANNEL", result.channel);
+
+  logger.blank();
+  logger.banner(
+    result.ok
+      ? [`✅ ${result.text}`, "Mets le même canal dans l'app du téléphone, puis lance le bot : npm start"]
+      : [`⚠️ ${result.text}`],
+    result.ok ? logger.colors.green : logger.colors.yellow,
+  );
+  process.exitCode = result.ok ? 0 : 1;
+  // Filet : une connexion Telegram restée ouverte ne bloque pas la fin
+  setTimeout(() => process.exit(), 10_000).unref();
+}
+
 // ─── Point d'entrée ──────────────────────────────────────────────────────────
 
 function announceOnline() {
@@ -881,6 +979,7 @@ function announceOnline() {
 
 async function main() {
   if (SETUP_MODE) return runSetup();
+  if (CHANNEL_MODE) return runChannelSetup();
 
   logger.blank();
   logger.banner(
@@ -903,6 +1002,9 @@ async function main() {
   }
   logger.info(`🤝 Rôle : ${relay.describeRole()}`);
   logger.info(`🔔 Alertes : ${notifier.describe()}`);
+  logger.info(`📣 Publication des gains : ${publisher.describe()}`);
+  void checkPublishing();
+  listenPublishCommands();
 
   // 2. Historique et anti-blocage (compteur, arrêt ⛔ et blocage Binance en
   //    cours survivent aux redémarrages)

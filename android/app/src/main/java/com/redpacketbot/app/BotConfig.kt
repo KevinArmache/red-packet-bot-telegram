@@ -15,6 +15,8 @@ data class BotConfig(
     val alertBotToken: String = "",
     val notifyLevel: String = "all",
     val alertChatId: String = "",
+    // 📣 Gains publiés sur ton canal par le bot d'alertes (src/publisher.js)
+    val publishChannel: String = "",
     val botRole: String = "backup",
     val botName: String = "",
     val healthcheckUrl: String = "",
@@ -82,6 +84,10 @@ data class BotConfig(
         if (token.isNotEmpty() && !token.matches(Regex("\\d{5,}:[A-Za-z0-9_-]{30,}"))) {
             errors += "alertBotToken" to "Jeton du bot d'alertes : format 123456789:ABC… (donné par @BotFather)."
         }
+        val publish = bareChannel(publishChannel)
+        if (publish.isNotEmpty() && !publish.matches(ID) && !publish.matches(USERNAME)) {
+            errors += "publishChannel" to "Ton canal : mets @pseudo, un lien t.me/pseudo ou son ID -100…."
+        }
         if (maxMessageAgeS.isNotBlank() && maxMessageAgeS.trim().toIntOrNull() == null) {
             errors += "maxMessageAgeS" to "Fraîcheur max : un nombre de secondes (180 conseillé)."
         }
@@ -136,6 +142,11 @@ data class BotConfig(
             null
         },
         if (xEnabled && xDryRun) "X : essai à blanc actif, aucun code X ne sera tapé sur Binance." else null,
+        if (publishChannel.isNotBlank() && alertBotToken.isBlank()) {
+            "Publication : il faut le jeton du bot d'alertes, c'est lui qui publie sur ton canal."
+        } else {
+            null
+        },
     )
 
     /** Variables d'environnement pour le bot (Node.js). */
@@ -148,6 +159,7 @@ data class BotConfig(
         put("NOTIFY_LEVEL", notifyLevel)
         put("ALERT_BOT_TOKEN", alertBotToken.trim())
         put("ALERT_CHAT_ID", alertChatId.trim())
+        put("PUBLISH_CHANNEL", if (publishChannel.isBlank()) "" else normalizedChannel(publishChannel))
         put("BOT_ROLE", botRole)
         put("BOT_NAME", botName.trim().ifEmpty { "📱 Téléphone" })
         put("HEALTHCHECK_URL", healthcheckUrl.trim())
@@ -171,6 +183,7 @@ data class BotConfig(
         put("alertBotToken", alertBotToken)
         put("notifyLevel", notifyLevel)
         put("alertChatId", alertChatId)
+        put("publishChannel", publishChannel)
         put("botRole", botRole)
         put("botName", botName)
         put("healthcheckUrl", healthcheckUrl)
@@ -202,6 +215,7 @@ data class BotConfig(
             alertBotToken = pick("ALERT_BOT_TOKEN", alertBotToken),
             notifyLevel = pick("NOTIFY_LEVEL", notifyLevel).lowercase(),
             alertChatId = pick("ALERT_CHAT_ID", alertChatId),
+            publishChannel = pick("PUBLISH_CHANNEL", publishChannel),
             healthcheckUrl = pick("HEALTHCHECK_URL", healthcheckUrl),
             maxMessageAgeS = pick("MAX_MESSAGE_AGE_S", maxMessageAgeS),
             resolveLinkedChats = env["RESOLVE_LINKED_CHATS"]?.let { it.trim().lowercase() != "false" }
@@ -251,6 +265,7 @@ data class BotConfig(
             alertBotToken = o.optString("alertBotToken"),
             notifyLevel = o.optString("notifyLevel", "all"),
             alertChatId = o.optString("alertChatId"),
+            publishChannel = o.optString("publishChannel"),
             botRole = o.optString("botRole", "backup"),
             botName = o.optString("botName"),
             healthcheckUrl = o.optString("healthcheckUrl"),

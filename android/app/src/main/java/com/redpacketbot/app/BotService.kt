@@ -63,6 +63,10 @@ class BotService : Service() {
         const val ACTION_TELEGRAM_LOGIN = "com.redpacketbot.app.TELEGRAM_LOGIN"
         const val ACTION_PROMPT_ANSWER = "com.redpacketbot.app.PROMPT_ANSWER"
         const val ACTION_TEST_ALERT = "com.redpacketbot.app.TEST_ALERT"
+        const val ACTION_SETUP_CHANNEL = "com.redpacketbot.app.SETUP_CHANNEL"
+        const val ACTION_CHECK_CHANNEL = "com.redpacketbot.app.CHECK_CHANNEL"
+        const val EXTRA_TITLE = "title"
+        const val EXTRA_USERNAME = "username"
         const val EXTRA_PROMPT_ID = "promptId"
         const val EXTRA_VALUE = "value"
 
@@ -272,6 +276,21 @@ class BotService : Service() {
                 resumeOrStop()
             }
             ACTION_TEST_ALERT -> if (nodeRunning) bridge?.event("test_alert") else resumeOrStop()
+            // 📣 Réglages → « Créer mon canal » : ton compte Telegram le crée, ton bot d'alertes y publie
+            ACTION_SETUP_CHANNEL -> if (nodeRunning) {
+                BotState.update(files) {
+                    it.put("channelSetup", JSONObject().put("state", "running").put("at", System.currentTimeMillis()))
+                }
+                bridge?.event(
+                    "publish_setup",
+                    JSONObject()
+                        .put("title", intent?.getStringExtra(EXTRA_TITLE).orEmpty())
+                        .put("username", intent?.getStringExtra(EXTRA_USERNAME).orEmpty()),
+                )
+            } else {
+                resumeOrStop()
+            }
+            ACTION_CHECK_CHANNEL -> if (nodeRunning) bridge?.event("publish_check") else resumeOrStop()
         }
         return START_STICKY
     }
@@ -511,6 +530,37 @@ class BotService : Service() {
             "test_alert_result" -> BotState.update(files) {
                 it.put("testAlert", if (data.optBoolean("ok")) "ok" else if (data.optBoolean("enabled")) "failed" else "disabled")
                 it.put("testAlertAt", System.currentTimeMillis())
+            }
+            "publish_setup_result" -> {
+                // Canal créé : gardé dans les réglages (le bot publie déjà dessus, sans redémarrer)
+                val channel = data.optString("channel")
+                if (channel.isNotEmpty()) {
+                    BotConfig.load(files.config).copy(publishChannel = channel).save(files.config)
+                }
+                BotState.update(files) {
+                    it.put(
+                        "channelSetup",
+                        JSONObject()
+                            .put("state", if (data.optBoolean("ok")) "ok" else "failed")
+                            .put("channel", channel)
+                            .put("title", data.optString("title"))
+                            .put("text", data.optString("text"))
+                            .put("at", System.currentTimeMillis()),
+                    )
+                    if (data.optBoolean("ok")) {
+                        it.put("publishCheck", JSONObject().put("ok", true).put("channel", channel).put("text", data.optString("text")))
+                    }
+                }
+            }
+            "publish_check_result" -> BotState.update(files) {
+                it.put(
+                    "publishCheck",
+                    JSONObject()
+                        .put("ok", data.opt("ok") ?: JSONObject.NULL)
+                        .put("channel", data.optString("channel"))
+                        .put("text", data.optString("text"))
+                        .put("at", System.currentTimeMillis()),
+                )
             }
         }
     }

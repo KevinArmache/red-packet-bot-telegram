@@ -213,6 +213,13 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
     fun stop() = send(BotService.ACTION_STOP)
     fun restart() = send(BotService.ACTION_RESTART)
     fun testAlert() = send(BotService.ACTION_TEST_ALERT)
+    fun checkChannel() = send(BotService.ACTION_CHECK_CHANNEL)
+
+    /** 📣 Crée ton canal (ton compte Telegram) et y met ton bot d'alertes administrateur. */
+    fun setupChannel(title: String, username: String) = send(BotService.ACTION_SETUP_CHANNEL) {
+        putExtra(BotService.EXTRA_TITLE, title)
+        putExtra(BotService.EXTRA_USERNAME, username)
+    }
     fun telegramLogin() = send(BotService.ACTION_TELEGRAM_LOGIN)
 
     fun answerPrompt(id: Int, value: String) = send(BotService.ACTION_PROMPT_ANSWER) {

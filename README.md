@@ -18,6 +18,7 @@
 - [📱 Android 24/7](#-android-247)
 - [🤝 Relais PC ⇄ téléphone](#-relais-pc--téléphone)
 - [🔔 Alertes Telegram](#-alertes-telegram)
+- [📣 Publier tes gains sur ton canal](#-publier-tes-gains-sur-ton-canal)
 - [🔧 Configuration (.env)](#-configuration-env)
 - [📊 Logs et bilan](#-logs-et-bilan)
 - [🎯 Comment les codes sont détectés](#-comment-les-codes-sont-détectés)
@@ -38,6 +39,7 @@
 - **📡 100+ canaux sans angle mort** — écoute active avant même la résolution des canaux, résolution groupée, canaux adoptés à la volée, groupes de discussion liés.
 - **🛡️ Protections anti-ban** — une seule soumission par code, un code à la fois, anti-doublons 48 h, **anti-blocage** (le bot compte les codes faux d'affilée et ne tape jamais le 10e, qui bloquerait les Red Packets 5 h), pause seulement sur un vrai blocage Binance, navigateur furtif, session Binance expirée détectée sans jamais taper un code au mauvais endroit.
 - **🔔 Alertes qui sonnent vraiment** — via ton propre bot Telegram (@BotFather) : gains, reconnexions à faire, pauses, plantages, bilan quotidien.
+- **📣 Tes gains publiés sur ton canal** — chaque Red Packet gagné part tout seul sur ton canal Telegram, code copiable et montant compris, pour que tes abonnés le tentent aussi.
 - **🐦 Codes publiés sur X (Twitter)** — le téléphone lit les notifications de l'appli X (comptes suivis avec la cloche) : ni scraping, ni API, rien que X puisse bloquer. Mêmes règles et même anti-blocage que Telegram ; quand le PC réclame, le téléphone lui transmet les codes (`#xcode`).
 - **🤝 Relais PC ⇄ téléphone** — le PC a la priorité, le téléphone prend le relais dès que le PC s'arrête. Un seul appareil réclame à la fois, pour ne pas soumettre deux fois le même code.
 - **📱 App Android 24/7** — une APK fabriquée en une commande (`npm run apk`), thème sombre « rouge & or » (clair si le téléphone est en mode clair), assistant de démarrage, réglages et connexions dans l'app (Binance en plein écran), tableau de bord (gains, graphique 24 h, jauge anti-blocage, relais, stats par canal), service permanent, relance automatique (plantage, redémarrage du téléphone, mise à jour).
@@ -318,6 +320,51 @@ Un message que tu t'envoies dans tes Messages enregistrés **ne sonne jamais**. 
 
 ---
 
+## 📣 Publier tes gains sur ton canal
+
+Chaque Red Packet gagné peut partir **tout de suite et tout seul** sur ton canal Telegram, avec son code et le montant. Tes abonnés peuvent ainsi tenter le code à leur tour :
+
+```
+🧧 Red Packet réclamé !
+
+🎁 Code : ABCD1234
+💰 Gain : 0,52 USDT (≈ 0,52 $)
+```
+
+Le code est en monospace : une touche suffit pour le copier.
+
+### Mise en place
+
+**Le plus simple : le bot crée le canal pour toi.** Avec ton compte Telegram, il crée le canal, lui donne un `@pseudo` public si possible, y met ton bot d'alertes administrateur et enregistre le réglage :
+
+- **Téléphone** : **⚙️ Réglages** → **📣 Publier mes gains** → nom du canal et `@pseudo` voulu (facultatif) → **✨ Créer mon canal**. Le champ se remplit tout seul et le bot publie aussitôt, sans redémarrer. Mets ensuite le même canal dans le `.env` du PC.
+- **PC** (bot arrêté) : `npm run channel -- --title "🧧 Mon canal" --username monCanal`. La ligne `PUBLISH_CHANNEL=…` est écrite dans `.env`. Mets ensuite le même canal dans l'app du téléphone.
+
+Pseudo déjà pris : le bot essaie `monCanal_codes`, puis une variante avec un nombre. Pas de pseudo : canal privé, désigné par son ID `-100…`.
+
+**Canal déjà existant :**
+
+1. Ouvre ton canal → **Administrateurs** → **Ajouter un administrateur**.
+2. Choisis ton **bot d'alertes** (celui de `ALERT_BOT_TOKEN`) et laisse-lui le droit **Publier des messages**.
+3. Mets ton canal dans `.env` : `PUBLISH_CHANNEL=@monCanal`. Accepté : `@pseudo`, `https://t.me/pseudo`, ou l'ID `-100…` d'un canal privé. Sur le téléphone : **⚙️ Réglages** → **📣 Publier mes gains**.
+4. Relance le bot. Au démarrage, ces deux lignes confirment, sans rien publier :
+   - `📣 Publication des gains : activée — @monCanal, via ton bot d'alertes` ;
+   - `📣 @ton_bot peut publier sur @monCanal : chaque gain y partira tout de suite`.
+
+### Comment ça marche
+
+- **Seulement les gains confirmés par Binance.** Rien n'est publié pour un code faux, épuisé, au résultat inconnu ou un essai à blanc.
+- **L'appareil qui a gagné publie**, PC ou téléphone : mets le même canal des deux côtés. Un code n'est gagné qu'une fois, il n'est donc jamais publié deux fois.
+- **Ton compte reste passif** : c'est ton bot d'alertes qui publie, par l'API Bot. `NOTIFY_LEVEL` n'y change rien : même avec `off`, les gains sont publiés.
+- **Jamais bloquant** : les codes suivants sont réclamés sans attendre le post.
+- **Rafale de gains** : le premier part aussitôt, les suivants sont groupés (« 🧧 3 Red Packets réclamés ! », une ligne par code), avec 3 s au moins entre deux posts. Telegram limite les canaux à une vingtaine de messages par minute.
+- **La valeur en dollars** vient de la fenêtre de Binance, sinon du prix public, qui a 2 s au plus pour répondre. Sous 0,01 $, seul le montant en crypto est écrit.
+- **En cas de problème** : réseau coupé, 3 nouveaux essais (5, 15 puis 30 s) ; « trop de messages », le délai demandé par Telegram. Bot pas administrateur ou canal introuvable : le post est abandonné, avec une alerte ⚠️ « 📣 Gain non publié… » qui dit quoi faire (1 toutes les 3 h au plus).
+- **Ton canal est aussi dans `TARGET_CHANNELS` ?** Sans risque : ses codes, déjà gagnés, sont ignorés comme doublons. La ligne de démarrage le signale.
+- Le bilan 📊 compte les gains publiés (`📣 Gains publiés`).
+
+---
+
 ## 🔧 Configuration (.env)
 
 Le modèle commenté est [`.env.example`](.env.example). **L'app Android importe ce même `.env`** : elle règle elle-même ce qui change sur le téléphone (voir la fin de cette section).
@@ -346,6 +393,7 @@ S'il en manque une, le bot s'arrête tout de suite avec `🔑 Variables manquant
 - **`NOTIFY_LEVEL`** — défaut `off` (le modèle `.env.example` met `all`). `off`, `problems` ou `all`.
 - **`ALERT_BOT_TOKEN`** — vide par défaut, et alors aucune alerte. Jeton de ton bot @BotFather.
 - **`ALERT_CHAT_ID`** — vide par défaut : les alertes vont à ton propre compte. À remplir seulement pour un autre destinataire.
+- **`PUBLISH_CHANNEL`** — vide par défaut, et alors rien n'est publié. Ton canal (`@pseudo`, `https://t.me/pseudo` ou ID `-100…`), où ton bot d'alertes publie chaque gain. Voir [Publier tes gains](#-publier-tes-gains-sur-ton-canal).
 - **`BOT_NAME`** — défaut `💻 PC`, ou `📱 Téléphone` en `backup`. Préfixe des alertes et nom affiché dans le message de relais. Sur le téléphone, l'app met `📱 Téléphone` par défaut (option avancée dans ses Réglages).
 - **`HEALTHCHECK_URL`** — vide par défaut. Adresse appelée au démarrage puis toutes les 5 min (par exemple un check healthchecks.io). Sur le téléphone, mets-la dans les options avancées des Réglages de l'app.
 
@@ -546,7 +594,7 @@ Un code en cours de traitement, ou déjà mémorisé dans `history.json` (gagné
 
 - **Écoute passive** — le bot **reçoit** les messages par push. Il n'écrit dans aucun canal ni groupe, ne réagit à rien, ne marque rien comme lu.
 - **Une seule exception : tes Messages enregistrés**, pour le relais. Le PC (`primary`) y garde un message d'état silencieux, modifié toutes les 60 s. Le téléphone (`backup`) le lit, et n'y écrit que s'il déclenche lui-même une pause anti-ban. En `solo` : rien du tout.
-- **Alertes par ton bot** — elles passent par l'API Bot de ton bot @BotFather, pas par ton compte.
+- **Alertes par ton bot** — elles passent par l'API Bot de ton bot @BotFather, pas par ton compte. Il en va de même pour la [publication de tes gains](#-publier-tes-gains-sur-ton-canal) sur ton canal : ton compte n'écrit toujours dans aucun canal. Il agit une seule fois, et seulement à ta demande (bouton **✨ Créer mon canal** ou `npm run channel`) : il crée ton canal et y met ton bot administrateur.
 - **Pas d'historique** — pas de `getHistory`, pas de polling, et `catchUp: false` : le bot ne demande jamais d'anciens messages. Sa seule recherche : `#botrelay` dans tes Messages enregistrés, une fois au démarrage (sauf en `solo`).
 - **Très peu de requêtes** — la résolution groupée remplace environ 200 appels par 3. C'est ce qui évite le plus de `FLOOD_WAIT`.
 - **`FLOOD_WAIT` géré** — si Telegram impose une pause, le bot attend le délai demandé + 1 s (60 s au maximum), puis réessaie une fois.
@@ -644,6 +692,7 @@ red-packet-bot-telegram/
 │   ├── activity.js        # Journal d'activité de l'app (derniers codes, gains, stats par source)
 │   ├── prices.js          # Valeur en dollars des gains (prix public Binance, sans clé)
 │   ├── notifier.js        # Alertes via ton bot @BotFather
+│   ├── publisher.js       # Gains publiés sur ton canal (même bot)
 │   ├── queue.js           # File d'attente : un code à la fois
 │   ├── history.js         # Anti-doublons 48 h (history.json)
 │   ├── stats.js           # Compteurs du bilan d'activité
@@ -805,6 +854,8 @@ sudo journalctl -u cryptobox-bot -f
 | `🔑 Session Telegram à refaire` (téléphone) | App → **📡 Sources** → **✈️ Telegram** → **🔄 Se reconnecter**. |
 | `🔕 Alerte non envoyée : … envoie /start …` | Envoie `/start` à ton bot d'alertes. |
 | `🔕 Alerte non envoyée : … vérifie ALERT_BOT_TOKEN` | Jeton faux ou révoqué : recopie-le depuis @BotFather. |
+| `📣 … n'est pas administrateur du canal` ou `📣 Gain non publié … administrateur` | Canal → **Administrateurs** → ajoute ton bot d'alertes, avec le droit **Publier des messages**. |
+| `📣 Gain non publié … canal introuvable` | Vérifie `PUBLISH_CHANNEL` : `@pseudo` exact, ou l'ID `-100…` pour un canal privé. |
 | `🔕 Alertes : destinataire inconnu` | Normal avant la première connexion Telegram. Sinon, remplis `ALERT_CHAT_ID`. |
 | `🤝 Relais : un AUTRE appareil se déclare aussi PC prioritaire` | Un seul `primary` : le téléphone doit être en **Secours du PC** (Réglages de l'app). |
 | Le bot s'arrête tout seul sur le téléphone | Écran **Santé** de l'app : notification « Bot en marche » active (elle empêche le gel de HiOS), batterie sans restriction, démarrage auto et applis protégées dans Phone Master. Voir l'[étape 7 du guide](GUIDE-ANDROID.md#7-les-réglages-du-téléphone-écran-santé). Toujours endormi ? Le [guide de débogage](GUIDE-DEBOGAGE.md) explique comment laisser Claude examiner le téléphone par câble USB. |

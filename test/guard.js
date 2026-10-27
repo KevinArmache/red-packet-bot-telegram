@@ -625,6 +625,227 @@ async function main() {
     check("nom de crypto invalide : null", await priceUsd("../x", { fetchImpl: fakeFetch({}), now: at() }), null);
   }
 
+  // ─── Publication des gains sur ton canal ──────────────────────────────────
+  section("Publication des gains : format des posts");
+  {
+    const { formatPost, formatUsd, normalizeChannel } = require("../src/publisher");
+    check(
+      "un gain : code copiable, montant à la française",
+      formatPost([{ code: "ABCD1234", gain: "0.52 USDT", usd: 0.52 }]),
+      "🧧 Red Packet réclamé !\n\n🎁 Code : <code>ABCD1234</code>\n💰 Gain : 0,52 USDT (≈ 0,52 $)",
+    );
+    check(
+      "montant inconnu : pas de ligne 💰",
+      formatPost([{ code: "ABCD1234", gain: "", usd: null }]),
+      "🧧 Red Packet réclamé !\n\n🎁 Code : <code>ABCD1234</code>",
+    );
+    check(
+      "moins d'un centime : montant sans dollars, aucun chiffre perdu",
+      formatPost([{ code: "ABCD1234", gain: "0.00000005 BNB", usd: 0.00003 }]),
+      "🧧 Red Packet réclamé !\n\n🎁 Code : <code>ABCD1234</code>\n💰 Gain : 0,00000005 BNB",
+    );
+    check(
+      "plusieurs gains : une ligne par code",
+      formatPost([
+        { code: "ABCD1234", gain: "0.52 USDT", usd: 0.52 },
+        { code: "EFGH5678", gain: "12 SPELL", usd: 0.006 },
+        { code: "IJKL9012", gain: "", usd: null },
+      ]),
+      "🧧 3 Red Packets réclamés !\n\n🎁 <code>ABCD1234</code> · 0,52 USDT (≈ 0,52 $)\n" +
+        "🎁 <code>EFGH5678</code> · 12 SPELL\n🎁 <code>IJKL9012</code>",
+    );
+    check(
+      "HTML échappé",
+      formatPost([{ code: "ABCD1234", gain: "1 USDT <b>", usd: 1 }]).split("\n")[3],
+      "💰 Gain : 1 USDT &lt;b&gt; (≈ 1,00 $)",
+    );
+    check("dollars : grands montants", [formatUsd(12.4), formatUsd(1250.4)], ["12,40 $", "1 250 $"]);
+    check(
+      "canal : formes acceptées",
+      ["https://t.me/MonCanal/", "t.me/MonCanal", "@MonCanal", "-1001234567890", "", "t.me/+AbCdEf"].map(normalizeChannel),
+      ["@MonCanal", "@MonCanal", "@MonCanal", "-1001234567890", "", null],
+    );
+  }
+
+  section("Publication des gains : envoi (réseau simulé)");
+  {
+    const { createPublisher } = require("../src/publisher");
+    /** Faux Telegram : réponses jouées dans l'ordre, puis « ok ». */
+    const fakeTelegram = (answers = []) => {
+      const calls = [];
+      const fetchImpl = async (url, init) => {
+        const method = url.split("/").pop();
+        calls.push({ method, body: JSON.parse(init.body) });
+        await sleep(5); // requête en vol : les gains suivants s'accumulent
+        const answer = answers.shift() ?? { status: 200, body: { ok: true, result: {} } };
+        if (answer.throws) throw new Error(answer.throws);
+        return { ok: answer.status === 200, status: answer.status, json: async () => answer.body };
+      };
+      return { calls, fetchImpl };
+    };
+    const make = (tg, extra = {}) => {
+      const alerts = [];
+      const slept = [];
+      const publisher = createPublisher({
+        token: "123456:ABC",
+        channel: "t.me/MonCanal",
+        fetchImpl: tg.fetchImpl,
+        notify: (text, opts) => alerts.push({ text, key: opts?.key }),
+        sleep: (ms) => {
+          slept.push(ms);
+          return sleep(1);
+        },
+        ...extra,
+      });
+      return { publisher, alerts, slept };
+    };
+
+    {
+      const tg = fakeTelegram();
+      const { publisher, alerts } = make(tg);
+      publisher.publish({ code: "AAAA1111", gain: "1 USDT", gainUsd: 1 });
+      publisher.publish({ code: "BBBB2222", gain: "2 USDT", gainUsd: 2 });
+      publisher.publish({ code: "CCCC3333", gain: "", gainUsd: null });
+      await publisher.flush();
+      check("rafale : le 1er seul, puis les 2 suivants groupés", tg.calls.length, 2);
+      check("rafale : 1er post", tg.calls[0]?.body.text.includes("AAAA1111"), true);
+      check(
+        "rafale : 2e post groupé",
+        tg.calls[1]?.body.text.startsWith("🧧 2 Red Packets réclamés !") && tg.calls[1].body.text.includes("CCCC3333"),
+        true,
+      );
+      check("canal et format", [tg.calls[0]?.body.chat_id, tg.calls[0]?.body.parse_mode], ["@MonCanal", "HTML"]);
+      check("rafale : aucune alerte", alerts.length, 0);
+      check("bilan", publisher.statsRows(), [["📣 Gains publiés", "3"]]);
+    }
+
+    {
+      const tg = fakeTelegram([
+        { status: 429, body: { ok: false, description: "Too Many Requests: retry after 7", parameters: { retry_after: 7 } } },
+      ]);
+      const { publisher, slept } = make(tg);
+      publisher.publish({ code: "AAAA1111", gain: "1 USDT", gainUsd: 1 });
+      await publisher.flush();
+      check("429 : nouvel essai après le délai demandé + 1 s", [tg.calls.length, slept.includes(8000)], [2, true]);
+    }
+
+    {
+      const tg = fakeTelegram([
+        { status: 403, body: { ok: false, description: "Forbidden: bot is not a member of the channel chat" } },
+        { status: 403, body: { ok: false, description: "Forbidden: bot is not a member of the channel chat" } },
+      ]);
+      const { publisher, alerts } = make(tg);
+      publisher.publish({ code: "AAAA1111", gain: "1 USDT", gainUsd: 1 });
+      await publisher.flush();
+      check("bot pas admin : abandon sans nouvel essai", tg.calls.length, 1);
+      check("bot pas admin : alerte qui dit quoi faire", alerts[0]?.text.includes("administrateur du canal"), true);
+      check("bot pas admin : alerte limitée (clé commune)", alerts[0]?.key, "publish-failed");
+      check("bilan : non publié", publisher.statsRows(), [["📣 Gains publiés", "0 (1 non publié(s))"]]);
+    }
+
+    {
+      const tg = fakeTelegram([{ throws: "ECONNRESET" }, { throws: "ECONNRESET" }]);
+      const { publisher, slept } = make(tg);
+      publisher.publish({ code: "AAAA1111", gain: "1 USDT", gainUsd: 1 });
+      await publisher.flush();
+      check("réseau coupé : 2 nouveaux essais (5 s puis 15 s)", [tg.calls.length, slept.slice(0, 2)], [3, [5000, 15000]]);
+    }
+
+    {
+      const tg = fakeTelegram();
+      const { publisher } = make(tg, { priceUsd: async (coin) => (coin === "ABC" ? 2 : null) });
+      publisher.publish({ code: "AAAA1111", gain: "0.5 ABC", gainUsd: null });
+      await publisher.flush();
+      check("dollars absents de Binance : prix public", tg.calls[0]?.body.text.endsWith("0,5 ABC (≈ 1,00 $)"), true);
+    }
+
+    {
+      const tg = fakeTelegram([
+        { status: 200, body: { ok: true, result: { id: 42, username: "mon_alert_bot" } } },
+        { status: 200, body: { ok: true, result: { status: "administrator", can_post_messages: true } } },
+        { status: 200, body: { ok: true, result: { id: 42, username: "mon_alert_bot" } } },
+        { status: 200, body: { ok: true, result: { status: "left" } } },
+      ]);
+      const { publisher, alerts } = make(tg);
+      check("vérification : bot admin", (await publisher.check()).ok, true);
+      check("vérification : rien n'est publié", tg.calls.map((c) => c.method), ["getMe", "getChatMember"]);
+      const refused = await publisher.check();
+      check("vérification : bot absent du canal", refused.ok, false);
+      check("vérification : texte pour l'app", refused.text.startsWith("@mon_alert_bot n'est pas administrateur du canal — ajoute"), true);
+      check("vérification : alerte", alerts[0]?.text.includes("@mon_alert_bot n'est pas administrateur"), true);
+      const offline = make(fakeTelegram([{ throws: "ENOTFOUND" }]));
+      check("vérification : réseau absent, remise à plus tard", (await offline.publisher.check()).ok, null);
+      check("vérification : réseau absent, aucune alerte", offline.alerts.length, 0);
+    }
+
+    {
+      /** Faux compte Telegram (userbot) : crée le canal, refuse les pseudos déjà pris. */
+      const fakeAccount = (taken = []) => {
+        const steps = [];
+        return {
+          steps,
+          createChannel: async ({ title }) => {
+            steps.push(["create", title]);
+            return { id: -1009876543210, title };
+          },
+          setChatUsername: async (_id, name) => {
+            steps.push(["username", name]);
+            if (taken.includes(name)) throw new Error("USERNAME_OCCUPIED");
+          },
+          editAdminRights: async ({ userId, rights }) => steps.push(["admin", userId, rights.postMessages]),
+        };
+      };
+      const botAnswers = () => [
+        { status: 200, body: { ok: true, result: { id: 42, username: "mon_alert_bot" } } },
+        { status: 200, body: { ok: true, result: { id: 42, username: "mon_alert_bot" } } },
+        { status: 200, body: { ok: true, result: { status: "administrator", can_post_messages: true } } },
+      ];
+
+      const account = fakeAccount(["redpacketrdc"]);
+      const setup = createPublisher({ token: "123456:ABC", channel: "", fetchImpl: fakeTelegram(botAnswers()).fetchImpl });
+      const created = await setup.setupChannel(account, { title: "🧧 Red Packet RDC", username: "@redpacketrdc" });
+      check("création : pseudo pris, variante « _codes »", created.channel, "@redpacketrdc_codes");
+      check(
+        "création : canal, pseudo, bot admin avec le droit de publier",
+        account.steps,
+        [
+          ["create", "🧧 Red Packet RDC"],
+          ["username", "redpacketrdc"],
+          ["username", "redpacketrdc_codes"],
+          ["admin", "mon_alert_bot", true],
+        ],
+      );
+      check("création : vérifiée", created.ok, true);
+
+      const privateAccount = fakeAccount();
+      const privateSetup = createPublisher({ token: "1:A", channel: "", fetchImpl: fakeTelegram(botAnswers()).fetchImpl });
+      const privateChannel = await privateSetup.setupChannel(privateAccount, { title: "" });
+      check("création sans pseudo : canal privé (ID), titre par défaut", [privateChannel.channel, privateChannel.title], ["-1009876543210", "🧧 Red Packet Codes"]);
+
+      const noBot = await createPublisher({ token: "", channel: "" }).setupChannel(fakeAccount(), {});
+      check("création sans jeton : refusée avant de créer quoi que ce soit", [noBot.ok, noBot.channel], [false, ""]);
+    }
+
+    {
+      const { usernameCandidates } = require("../src/publisher");
+      const names = usernameCandidates("@Red Packet-RDC!");
+      check("pseudos : nettoyés", names.slice(0, 2), ["RedPacketRDC", "RedPacketRDC_codes"]);
+      check("pseudos : trop court = canal privé", usernameCandidates("ab"), []);
+    }
+
+    {
+      const tg = fakeTelegram();
+      const off = createPublisher({ token: "123456:ABC", channel: "", fetchImpl: tg.fetchImpl });
+      off.publish({ code: "AAAA1111", gain: "1 USDT", gainUsd: 1 });
+      await off.flush();
+      check("canal vide : rien n'est publié", [off.describe(), tg.calls.length], ["désactivée (PUBLISH_CHANNEL vide)", 0]);
+      const noToken = createPublisher({ token: "", channel: "@MonCanal" });
+      check("jeton vide : expliqué", noToken.describe().startsWith("impossible : ALERT_BOT_TOKEN vide"), true);
+      const watched = createPublisher({ token: "1:A", channel: "@MonCanal", targets: "@autre, https://t.me/moncanal" });
+      check("canal aussi surveillé : signalé", watched.describe().includes("aussi surveillé"), true);
+    }
+  }
+
   console.log(
     failures
       ? `\n❌ ${failures} vérification(s) en échec sur ${checks}\n`

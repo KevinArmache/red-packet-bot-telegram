@@ -134,7 +134,17 @@ Tu peux aussi tout remplir à la main.
 - `API_HASH` fait 32 caractères, et ce n'est pas la valeur d'exemple ;
 - le numéro est au format international (`+243…`) ;
 - les canaux sont valides (`@pseudo`, lien `t.me/…`, ou ID qui commence par `-100`) ;
-- le jeton du bot d'alertes a la bonne forme.
+- le jeton du bot d'alertes a la bonne forme ;
+- ton canal de publication (📣) est un `@pseudo`, un lien `t.me/…` ou un ID `-100…`.
+
+**📣 Publier mes gains** (facultatif) : chaque Red Packet gagné par le téléphone part tout de suite sur ton canal Telegram, avec son code et le montant.
+
+- **Pas encore de canal :** bot démarré, remplis le nom du canal et le `@pseudo` voulu, puis touche **✨ Créer mon canal**. Le bot le crée avec ton compte Telegram, y met ton bot d'alertes administrateur et remplit le champ. Il publie aussitôt, sans redémarrer.
+- **Canal existant :** mets-le dans le champ, puis ajoute ton bot d'alertes comme **administrateur du canal**, avec le droit « Publier des messages ».
+- La carte affiche ensuite ✅ (ou ⚠️ avec quoi faire) et le lien `t.me/…` à partager. **🔎 Vérifier** refait le contrôle, sans rien publier.
+- Mets le même canal dans le `.env` du PC (`PUBLISH_CHANNEL`) : c'est l'appareil qui gagne qui publie.
+
+Détails dans le [README](README.md#-publier-tes-gains-sur-ton-canal).
 
 **Le rôle du téléphone :**
 

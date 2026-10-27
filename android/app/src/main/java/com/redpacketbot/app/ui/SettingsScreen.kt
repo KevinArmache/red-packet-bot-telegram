@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -78,6 +80,16 @@ fun SettingsScreen(vm: BotViewModel, importedEnv: MutableState<String?>, onNavig
         draft = draft.mergeEnv(text)
         attempted = true
         info = "📥 Réglages importés depuis $source : vérifie-les, puis « Enregistrer »."
+    }
+
+    // 📣 Canal créé par le bouton « Créer mon canal » : le service l'a déjà enregistré
+    val createdChannel = snapshot.state.optJSONObject("channelSetup")?.optString("channel").orEmpty()
+    LaunchedEffect(createdChannel) {
+        if (createdChannel.isEmpty() || saved.publishChannel == createdChannel) return@LaunchedEffect
+        // Seulement si c'est encore le réglage enregistré (pas un ancien canal effacé depuis)
+        if (vm.loadConfig().publishChannel != createdChannel) return@LaunchedEffect
+        saved = saved.copy(publishChannel = createdChannel)
+        if (draft.publishChannel.isBlank()) draft = draft.copy(publishChannel = createdChannel)
     }
 
     // Fichier .env partagé vers l'app (« Partager » / « Ouvrir avec »)
@@ -173,6 +185,11 @@ fun SettingsScreen(vm: BotViewModel, importedEnv: MutableState<String?>, onNavig
                         ),
                         draft.notifyLevel,
                     ) { draft = draft.copy(notifyLevel = it) }
+                }
+            }
+            item {
+                SectionCard(title = "📣 Publier mes gains", subtitle = "Sur ton canal Telegram, par ton bot d'alertes") {
+                    PublishFields(vm, snapshot, draft, saved, { draft = it }, ::errorFor)
                 }
             }
             item {
@@ -348,6 +365,79 @@ fun TelegramFields(config: BotConfig, onChange: (BotConfig) -> Unit, errorFor: (
         { onChange(config.copy(phoneNumber = it)) },
         error = errorFor("phoneNumber"),
         keyboard = KeyboardType.Phone,
+    )
+}
+
+/**
+ * 📣 Ton canal de gains : le champ, la création en un appui (ton compte crée
+ * le canal, ton bot d'alertes y est mis administrateur), puis la vérification.
+ */
+@Composable
+fun PublishFields(
+    vm: BotViewModel,
+    snapshot: Snapshot,
+    config: BotConfig,
+    saved: BotConfig,
+    onChange: (BotConfig) -> Unit,
+    errorFor: (String) -> String?,
+) {
+    var title by rememberSaveable { mutableStateOf("🧧 Red Packet Codes") }
+    var username by rememberSaveable { mutableStateOf("") }
+    val setup = snapshot.state.optJSONObject("channelSetup")
+    val setupState = setup?.optString("state").orEmpty()
+    // « En cours » oublié après 2 min (bot relancé pendant la création)
+    val creating = setupState == "running" && System.currentTimeMillis() - (setup?.optLong("at") ?: 0L) < 120_000
+
+    SettingField(
+        "Ton canal (PUBLISH_CHANNEL)",
+        config.publishChannel,
+        { onChange(config.copy(publishChannel = it)) },
+        error = errorFor("publishChannel"),
+        supporting = "Vide = rien n'est publié · @pseudo, lien t.me/pseudo ou ID -100…",
+    )
+
+    if (saved.publishChannel.isBlank()) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Hint(
+            "Pas encore de canal ? Le bot le crée pour toi avec ton compte Telegram, y met ton bot d'alertes " +
+                "administrateur et remplit le champ : rien d'autre à faire.",
+        )
+        SettingField("Nom du canal", title, { title = it })
+        SettingField(
+            "@pseudo public (facultatif)",
+            username,
+            { username = it },
+            supporting = "Pour le lien t.me/pseudo · pris ? une variante est essayée · vide = canal privé",
+        )
+        when {
+            saved.alertBotToken.isBlank() ->
+                Hint("Mets d'abord le jeton du bot d'alertes (carte 🔔 ci-dessus) et enregistre : c'est lui qui publie.", AppColors.warning)
+            !snapshot.isRunning -> Hint("Démarre d'abord le bot : il crée le canal avec ta connexion Telegram.", AppColors.warning)
+            else -> Button(
+                onClick = { vm.setupChannel(title.trim(), username.trim()) },
+                enabled = !creating && config.publishChannel.isBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (creating) "⏳ Création du canal…" else "✨ Créer mon canal") }
+        }
+        if (setupState == "failed") Hint("⚠️ ${setup?.optString("text")}", AppColors.warning)
+    } else {
+        val channel = BotConfig.normalizedChannel(saved.publishChannel)
+        val check = snapshot.state.optJSONObject("publishCheck")
+            ?.takeIf { it.optString("channel").equals(channel, ignoreCase = true) }
+        when (check?.opt("ok")) {
+            true -> Hint("✅ ${check.optString("text")}", AppColors.success)
+            false -> Hint("⚠️ ${check.optString("text")}", AppColors.warning)
+            else -> if (check != null) Hint("⏳ ${check.optString("text")}", AppColors.info)
+        }
+        if (channel.startsWith("@")) Hint("🔗 Lien à partager : t.me/${channel.removePrefix("@")}")
+        if (snapshot.isRunning) {
+            OutlinedButton(onClick = { vm.checkChannel() }) { Text("🔎 Vérifier que mon bot peut publier") }
+        }
+    }
+    Hint(
+        "Chaque gain y part tout de suite, avec son code copiable : « 🧧 Red Packet réclamé ! " +
+            "🎁 Code : ABCD1234 · 💰 Gain : 0,52 USDT (≈ 0,52 $) ». Canal créé à la main ? Ajoute ton bot d'alertes " +
+            "comme administrateur, avec le droit « Publier des messages ».",
     )
 }
 

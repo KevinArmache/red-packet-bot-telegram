@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
+    "channel": "node index.js --channel",
     "apk": "node android/scripts/build-apk.mjs",
     "apk:install": "node android/scripts/build-apk.mjs --install",
     "test": "node test/guard.js && node test/claim-flow.js",
