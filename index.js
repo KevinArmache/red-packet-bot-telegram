@@ -1092,6 +1092,8 @@ async function main() {
         onCode: handleDetectedCode,
         onPost: (channel) => activity.channelSeen(channel, "x"),
       });
+      // 📣 Ton canal : ton bot reçoit tous ses droits si ce compte en est propriétaire
+      void publisher.ensureBotRights(client);
       logger.blank();
       logger.rule("📡 Canaux");
     },

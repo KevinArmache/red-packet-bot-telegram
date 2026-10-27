@@ -827,6 +827,36 @@ async function main() {
     }
 
     {
+      const botAnswers = (rights) => [
+        { status: 200, body: { ok: true, result: { id: 42, username: "mon_alert_bot" } } },
+        { status: 200, body: { ok: true, result: rights } },
+      ];
+      const promoted = [];
+      const owner = { editAdminRights: async ({ userId, rights }) => promoted.push([userId, rights.changeInfo]) };
+      const partial = createPublisher({
+        token: "1:A",
+        channel: "@MonCanal",
+        fetchImpl: fakeTelegram(botAnswers({ status: "administrator", can_post_messages: true, can_edit_messages: true })).fetchImpl,
+      });
+      check("droits du bot incomplets : complétés par le propriétaire", [await partial.ensureBotRights(owner), promoted], [true, [["mon_alert_bot", true]]]);
+      const full = createPublisher({
+        token: "1:A",
+        channel: "@MonCanal",
+        fetchImpl: fakeTelegram(
+          botAnswers({ status: "administrator", can_post_messages: true, can_edit_messages: true, can_change_info: true }),
+        ).fetchImpl,
+      });
+      check("droits du bot complets : rien à faire", [await full.ensureBotRights(owner), promoted.length], [false, 1]);
+      const notOwner = { editAdminRights: async () => { throw new Error("CHAT_ADMIN_REQUIRED"); } };
+      const other = createPublisher({
+        token: "1:A",
+        channel: "@MonCanal",
+        fetchImpl: fakeTelegram(botAnswers({ status: "administrator", can_post_messages: true })).fetchImpl,
+      });
+      check("autre compte (pas propriétaire) : ignoré sans erreur", await other.ensureBotRights(notOwner), false);
+    }
+
+    {
       const { usernameCandidates } = require("../src/publisher");
       const names = usernameCandidates("@Red Packet-RDC!");
       check("pseudos : nettoyés", names.slice(0, 2), ["RedPacketRDC", "RedPacketRDC_codes"]);

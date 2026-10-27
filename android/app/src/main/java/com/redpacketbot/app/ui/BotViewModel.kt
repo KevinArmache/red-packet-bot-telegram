@@ -3,10 +3,12 @@ package com.redpacketbot.app.ui
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.redpacketbot.app.ActivityLog
 import com.redpacketbot.app.AppFiles
+import com.redpacketbot.app.Backup
 import com.redpacketbot.app.BotConfig
 import com.redpacketbot.app.BotService
 import com.redpacketbot.app.BotState
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -39,6 +42,8 @@ data class Snapshot(
     val activity: ActivityLog,
     val xListener: XListenerState,
     val xAccess: Boolean,
+    /** 🧳 Dernier envoi de la sauvegarde par ton bot (Backup.state). */
+    val backup: JSONObject = JSONObject(),
 ) {
     val status: String get() = state.optString("status", BotState.STOPPED)
 
@@ -117,6 +122,7 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
             activity = activity,
             xListener = XListenerState.read(files.xListener),
             xAccess = XNotificationListener.isAccessGranted(getApplication()),
+            backup = Backup.state(files),
         )
     }
 
@@ -236,6 +242,52 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun loadConfig(): BotConfig = BotConfig.load(files.config)
+
+    // ─── 🧳 Sauvegarde ─────────────────────────────────────────────────────
+
+    fun setBackupAuto(auto: Boolean) = Backup.setAuto(files, auto)
+
+    /** Envoi tout de suite par ton bot d'alertes (même sans changement). */
+    fun sendBackupNow(onDone: (String) -> Unit) = viewModelScope.launch {
+        onDone(withContext(Dispatchers.IO) { Backup.send(getApplication(), files, force = true) }.orEmpty())
+    }
+
+    /** Fichier de sauvegarde écrit où tu l'as choisi (Drive, Téléchargements…). */
+    fun exportBackup(uri: Uri, onDone: (String) -> Unit) = viewModelScope.launch {
+        onDone(
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = Backup.build(getApplication(), files).toString(2)
+                    getApplication<Application>().contentResolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray()) }
+                    "💾 Sauvegarde enregistrée : garde-la en lieu sûr (elle contient tes secrets)."
+                }.getOrElse { "⚠️ Enregistrement impossible : ${it.message}" }
+            },
+        )
+    }
+
+    /**
+     * Remet en place une sauvegarde. Le bot est d'abord arrêté (40 s au plus),
+     * sinon il réécrirait ses fichiers en s'arrêtant.
+     */
+    fun restoreBackup(backup: JSONObject, onDone: (String) -> Unit) = viewModelScope.launch {
+        val message = withContext(Dispatchers.IO) {
+            if (snapshot.value.isRunning) {
+                send(BotService.ACTION_STOP)
+                for (attempt in 0 until 80) {
+                    val state = BotState.read(files)
+                    val stopping = state.optString("message").startsWith("Arrêt en cours")
+                    if (state.optString("status") == BotState.STOPPED && !stopping) break
+                    delay(500)
+                }
+            }
+            runCatching {
+                Backup.restore(getApplication(), files, backup)
+                "🧳 Sauvegarde restaurée : reconnecte Telegram et Binance, puis démarre le bot."
+            }.getOrElse { "⚠️ Restauration impossible : ${it.message}" }
+        }
+        _money.value = loadMoney()
+        onDone(message)
+    }
 
     private fun send(action: String, extras: Intent.() -> Unit = {}) =
         BotService.send(getApplication(), action, extras)

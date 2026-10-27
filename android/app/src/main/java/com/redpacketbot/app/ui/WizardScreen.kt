@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.redpacketbot.app.Backup
 import com.redpacketbot.app.BinanceLoginActivity
 import com.redpacketbot.app.ui.components.Banner
 import com.redpacketbot.app.ui.components.CheckRow
@@ -42,6 +44,7 @@ import com.redpacketbot.app.ui.components.SectionCard
 import com.redpacketbot.app.ui.components.SettingField
 import com.redpacketbot.app.ui.theme.AppColors
 import com.redpacketbot.app.ui.theme.Spacing
+import org.json.JSONObject
 
 private const val STEPS = 5
 
@@ -57,6 +60,7 @@ fun WizardScreen(vm: BotViewModel, onDone: () -> Unit) {
     var step by rememberSaveable { mutableIntStateOf(0) }
     var draft by rememberSaveable(stateSaver = ConfigSaver) { mutableStateOf(vm.loadConfig()) }
     var attempted by rememberSaveable { mutableStateOf(false) }
+    var pendingBackup by remember { mutableStateOf<JSONObject?>(null) }
     val errors = draft.fieldErrors()
     fun errorFor(key: String): String? =
         if (!attempted) null else errors.filter { it.first == key }.joinToString("\n") { it.second }.ifEmpty { null }
@@ -73,6 +77,17 @@ fun WizardScreen(vm: BotViewModel, onDone: () -> Unit) {
     }
 
     BackHandler(enabled = step > 0) { step-- }
+
+    pendingBackup?.let { backup ->
+        RestoreDialog(vm, backup, onDismiss = { pendingBackup = null }) { message ->
+            pendingBackup = null
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            if (message.startsWith("🧳")) {
+                draft = vm.loadConfig()
+                attempted = false
+            }
+        }
+    }
 
     Column(Modifier.fillMaxSize().imePadding()) {
         // ── Progression ────────────────────────────────────────────────────
@@ -106,9 +121,15 @@ fun WizardScreen(vm: BotViewModel, onDone: () -> Unit) {
                     1 -> {
                         item { StepTitle("✈️", "Telegram", "Le compte qui lit les canaux (le même que sur le PC).") }
                         item {
-                            SectionCard(title = "📥 Le plus rapide : ton .env du PC") {
+                            SectionCard(title = "📥 Le plus rapide : ta sauvegarde 🧳 ou ton .env du PC") {
+                                Hint("Nouveau téléphone ? Ouvre la sauvegarde épinglée par ton bot d'alertes, ou choisis-la ici.")
                                 EnvImportButtons { text, source ->
-                                    if (text.isNullOrBlank() || !text.contains("=")) {
+                                    if (Backup.isBackup(text)) {
+                                        pendingBackup = Backup.parse(text)
+                                        if (pendingBackup == null) {
+                                            Toast.makeText(context, "⚠️ Sauvegarde illisible ($source)", Toast.LENGTH_SHORT).show()
+                                        }
+                                    } else if (text.isNullOrBlank() || !text.contains("=")) {
                                         Toast.makeText(context, "⚠️ Rien à importer ($source)", Toast.LENGTH_SHORT).show()
                                     } else {
                                         draft = draft.mergeEnv(text)

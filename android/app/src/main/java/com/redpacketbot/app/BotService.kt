@@ -441,6 +441,8 @@ class BotService : Service() {
         scheduler.scheduleWithFixedDelay({ watchHeartbeat() }, 5, 15, TimeUnit.SECONDS)
         // Cookies Binance écrits sur disque régulièrement
         scheduler.scheduleWithFixedDelay({ CookieManager.getInstance().flush() }, 5, 5, TimeUnit.MINUTES)
+        // 🧳 Sauvegarde renvoyée par ton bot si quelque chose a changé (au plus 1 par jour hors réglages)
+        scheduler.scheduleWithFixedDelay({ backupInBackground() }, 6, 6, TimeUnit.HOURS)
         updateNotification()
     }
 
@@ -522,6 +524,8 @@ class BotService : Service() {
                     it.remove("prompt")
                 }
                 Notifications.cancel(this, Notifications.ID_TELEGRAM)
+                // Réseau et destinataire des alertes connus : sauvegarde à jour (réglages changés)
+                backupInBackground()
             }
             "fatal" -> BotState.update(files) {
                 it.put("lastError", data.optString("message"))
@@ -563,6 +567,11 @@ class BotService : Service() {
                 )
             }
         }
+    }
+
+    /** 🧳 Envoi de la sauvegarde, hors du fil du scheduler (requêtes réseau). */
+    private fun backupInBackground() {
+        Thread({ runCatching { Backup.send(this, files, force = false) } }, "rpb-backup").start()
     }
 
     /** Connexion faite dans l'écran Binance de l'app : le bot recharge sa page. */

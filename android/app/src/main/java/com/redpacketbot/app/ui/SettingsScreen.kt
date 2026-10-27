@@ -3,14 +3,17 @@ package com.redpacketbot.app.ui
 import android.content.ClipboardManager
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -22,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -30,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.redpacketbot.app.Backup
 import com.redpacketbot.app.BotConfig
 import com.redpacketbot.app.ui.components.Banner
 import com.redpacketbot.app.ui.components.ChoiceGroup
@@ -62,6 +67,8 @@ fun SettingsScreen(vm: BotViewModel, importedEnv: MutableState<String?>, onNavig
     var attempted by rememberSaveable { mutableStateOf(false) }
     var advanced by rememberSaveable { mutableStateOf(false) }
     var info by rememberSaveable { mutableStateOf("") }
+    /** 🧳 Sauvegarde ouverte (fichier partagé, 📂), en attente de ta confirmation. */
+    var pendingBackup by remember { mutableStateOf<JSONObject?>(null) }
 
     val errors = draft.fieldErrors()
     val draftJson = draft.toJson()
@@ -73,6 +80,13 @@ fun SettingsScreen(vm: BotViewModel, importedEnv: MutableState<String?>, onNavig
     }
 
     fun importText(text: String?, source: String) {
+        if (Backup.isBackup(text)) {
+            pendingBackup = Backup.parse(text)
+            if (pendingBackup == null) {
+                info = "⚠️ Sauvegarde illisible ($source) : fichier abîmé, ou fait par une version plus récente de l'app."
+            }
+            return
+        }
         if (text.isNullOrBlank() || !text.contains("=")) {
             info = "⚠️ Rien à importer ($source) : il faut le contenu d'un fichier .env."
             return
@@ -114,6 +128,19 @@ fun SettingsScreen(vm: BotViewModel, importedEnv: MutableState<String?>, onNavig
             if (restarting) "✅ Enregistré — le bot redémarre avec les nouveaux réglages." else "✅ Enregistré.",
             Toast.LENGTH_LONG,
         ).show()
+    }
+
+    pendingBackup?.let { backup ->
+        RestoreDialog(vm, backup, onDismiss = { pendingBackup = null }) { message ->
+            pendingBackup = null
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            if (message.startsWith("🧳")) {
+                saved = vm.loadConfig()
+                draft = saved
+                // Connexions et autorisations à refaire : l'assistant, champs déjà remplis
+                onNavigate(Routes.WIZARD)
+            }
+        }
     }
 
     Box(Modifier.fillMaxSize().imePadding()) {
@@ -190,6 +217,11 @@ fun SettingsScreen(vm: BotViewModel, importedEnv: MutableState<String?>, onNavig
             item {
                 SectionCard(title = "📣 Publier mes gains", subtitle = "Sur ton canal Telegram, par ton bot d'alertes") {
                     PublishFields(vm, snapshot, draft, saved, { draft = it }, ::errorFor)
+                }
+            }
+            item {
+                SectionCard(title = "🧳 Sauvegarde", subtitle = "Pour tout retrouver sur un nouveau téléphone") {
+                    BackupFields(vm, snapshot, saved, ::importText)
                 }
             }
             item {
@@ -337,14 +369,7 @@ private fun CurrencyCard(vm: BotViewModel) {
 @Composable
 fun EnvImportButtons(onText: (String?, String) -> Unit) {
     val context = LocalContext.current
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) {
-            val text = runCatching {
-                context.contentResolver.openInputStream(uri)?.use { it.readBytes().take(200_000).toByteArray().decodeToString() }
-            }.getOrNull()
-            onText(text, "le fichier")
-        }
-    }
+    val picker = rememberFilePicker(onText)
     Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
         OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }) { Text("📂 Choisir le fichier") }
         OutlinedButton(onClick = {
@@ -352,6 +377,100 @@ fun EnvImportButtons(onText: (String?, String) -> Unit) {
             onText(clip?.getItemAt(0)?.coerceToText(context)?.toString(), "le presse-papiers")
         }) { Text("📋 Coller") }
     }
+}
+
+/** Choix d'un fichier (.env ou sauvegarde 🧳), lu en texte (2 Mo au plus). */
+@Composable
+fun rememberFilePicker(onText: (String?, String) -> Unit): ManagedActivityResultLauncher<Array<String>, Uri?> {
+    val context = LocalContext.current
+    return rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)?.use {
+                    it.readBytes().take(Backup.MAX_BYTES).toByteArray().decodeToString()
+                }
+            }.getOrNull()
+            onText(text, "le fichier")
+        }
+    }
+}
+
+/**
+ * 🧳 La sauvegarde envoyée par ton bot : état du dernier envoi, envoi
+ * automatique, envoi tout de suite, export dans un fichier, restauration.
+ */
+@Composable
+fun BackupFields(vm: BotViewModel, snapshot: Snapshot, saved: BotConfig, onFile: (String?, String) -> Unit) {
+    val context = LocalContext.current
+    var sending by remember { mutableStateOf(false) }
+    val picker = rememberFilePicker(onFile)
+    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri: Uri? ->
+        if (uri != null) vm.exportBackup(uri) { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+    }
+
+    Hint(
+        "Ton bot d'alertes t'envoie tout seul une sauvegarde, épinglée dans sa discussion : réglages, gains, " +
+            "compteur anti-blocage, historique des codes. Téléphone perdu : installe l'app, touche ce fichier → " +
+            "« Ouvrir avec » → Red Packet Bot. Ni session Telegram ni Binance dedans : tu te reconnectes.",
+    )
+    Backup.describe(snapshot.backup)?.let { Hint(it, if (it.startsWith("✅")) AppColors.success else AppColors.warning) }
+    SwitchRow(
+        "🔄",
+        "Envoi automatique",
+        "Quand tes réglages changent, et une fois par jour si tes gains ont bougé",
+        snapshot.backup.optBoolean("auto", true),
+    ) { vm.setBackupAuto(it) }
+    if (saved.alertBotToken.isBlank()) {
+        Hint("Il faut le jeton du bot d'alertes (carte 🔔) : c'est lui qui t'envoie la sauvegarde.", AppColors.warning)
+    } else {
+        Button(
+            onClick = {
+                sending = true
+                vm.sendBackupNow {
+                    sending = false
+                    Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+                }
+            },
+            enabled = !sending,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(if (sending) "⏳ Envoi…" else "📤 Envoyer maintenant") }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+        OutlinedButton(onClick = { exporter.launch(Backup.FILE_NAME) }) { Text("💾 Exporter") }
+        OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }) { Text("📂 Restaurer") }
+    }
+}
+
+/** 🧳 « Restaurer cette sauvegarde ? » : son contenu, puis la restauration. */
+@Composable
+fun RestoreDialog(vm: BotViewModel, backup: JSONObject, onDismiss: () -> Unit, onDone: (String) -> Unit) {
+    var restoring by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = { if (!restoring) onDismiss() },
+        title = { Text("🧳 Restaurer cette sauvegarde ?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                Text(Backup.summary(backup))
+                Hint(
+                    "Elle remplace les réglages, les gains et l'historique de ce téléphone. Le bot s'arrête le temps " +
+                        "de la restauration ; tu reconnecteras ensuite Telegram (code) et Binance.",
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    restoring = true
+                    vm.restoreBackup(backup) {
+                        restoring = false
+                        onDone(it)
+                    }
+                },
+                enabled = !restoring,
+            ) { Text(if (restoring) "⏳ Restauration…" else "🧳 Restaurer") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !restoring) { Text("Annuler") } },
+    )
 }
 
 /** API_ID, API_HASH, numéro. */

@@ -40,12 +40,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- « Partager » ou « Ouvrir avec » un fichier .env (bot.env) -->
+            <!-- « Partager » ou « Ouvrir avec » un fichier .env (bot.env) ou une sauvegarde 🧳 (.rpb) -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/*" />
                 <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/json" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -54,6 +55,7 @@
                 <data android:scheme="content" />
                 <data android:mimeType="text/*" />
                 <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/json" />
             </intent-filter>
         </activity>
 

@@ -19,6 +19,7 @@
 - [🤝 Relais PC ⇄ téléphone](#-relais-pc--téléphone)
 - [🔔 Alertes Telegram](#-alertes-telegram)
 - [📣 Publier tes gains sur ton canal](#-publier-tes-gains-sur-ton-canal)
+- [🧳 Téléphone perdu : la sauvegarde](GUIDE-ANDROID.md#10-bis--téléphone-perdu-ou-volé--tout-récupérer)
 - [🔧 Configuration (.env)](#-configuration-env)
 - [📊 Logs et bilan](#-logs-et-bilan)
 - [🎯 Comment les codes sont détectés](#-comment-les-codes-sont-détectés)
@@ -362,6 +363,18 @@ Pseudo déjà pris : le bot essaie `monCanal_codes`, puis une variante avec un n
 - **En cas de problème** : réseau coupé, 3 nouveaux essais (5, 15 puis 30 s) ; « trop de messages », le délai demandé par Telegram. Bot pas administrateur ou canal introuvable : le post est abandonné, avec une alerte ⚠️ « 📣 Gain non publié… » qui dit quoi faire (1 toutes les 3 h au plus).
 - **Ton canal est aussi dans `TARGET_CHANNELS` ?** Sans risque : ses codes, déjà gagnés, sont ignorés comme doublons. La ligne de démarrage le signale.
 - Le bilan 📊 compte les gains publiés (`📣 Gains publiés`).
+
+### Rendre ton canal trouvable
+
+Ton bot reçoit le droit de modifier le canal. Le bouton ✨ le donne dès la création ; pour un canal plus ancien, ton compte le lui redonne tout seul au démarrage, s'il est propriétaire du canal. La recherche de Telegram lit surtout le **nom** et le **@pseudo** du canal, puis sa description : mets-y les mots que les gens tapent (« Red Packet », « Binance », « Crypto Box », « codes »). La page publique `t.me/s/tonCanal` est aussi lue par Google.
+
+Pour aller plus loin :
+
+- ajoute ton canal sur les annuaires TGStat (tgstat.com) et Telemetr (telemetr.io) ;
+- mets le lien `t.me/…` dans la bio de ton compte X et dans tes posts ;
+- épingle un message de bienvenue.
+
+Telegram classe aussi les canaux par nombre d'abonnés : les premiers partages comptent le plus.
 
 ---
 

@@ -42,9 +42,20 @@ const MIN_USD_SHOWN = 0.01;
 
 // Canal créé par le bot (bouton de l'app, npm run channel)
 const DEFAULT_TITLE = "🧧 Red Packet Codes";
+// Mots-clés des recherches Telegram (titre, description) : Red Packet, Binance, Crypto Box, codes
 const DESCRIPTION =
-  "🧧 Codes Red Packet Binance réclamés en direct : copie le code d'une touche et réclame-le " +
-  "à ton tour dans l'appli Binance (Cryptobox).";
+  "🧧 Codes Red Packet Binance gratuits, publiés en direct dès qu'ils tombent. " +
+  "Binance Red Packet codes · Crypto Box · free USDT, BNB. " +
+  "Copie le code d'une touche et réclame-le vite dans l'appli Binance.";
+// Droits de ton bot dans le canal : publier, et soigner le canal (nom, description,
+// photo, message épinglé) pour qu'on le trouve dans les recherches
+const BOT_RIGHTS = {
+  changeInfo: true,
+  postMessages: true,
+  editMessages: true,
+  deleteMessages: true,
+  inviteUsers: true,
+};
 
 // ─── Format des posts ───────────────────────────────────────────────────────
 
@@ -393,7 +404,7 @@ function createPublisher(options = {}) {
       await tg.editAdminRights({
         chatId: chat.id,
         userId: me.result.username,
-        rights: { postMessages: true, editMessages: true, deleteMessages: true },
+        rights: BOT_RIGHTS,
         rank: "Red Packet",
       });
     } catch (err) {
@@ -419,7 +430,34 @@ function createPublisher(options = {}) {
     return [["📣 Gains publiés", `${counts.published}${counts.failed ? ` (${counts.failed} non publié(s))` : ""}`]];
   }
 
-  return { enabled, channel, describe, check, publish, flush, statsRows, setupChannel };
+  /**
+   * Canal créé avant que le bot reçoive tous ses droits : ton compte (s'il est
+   * propriétaire du canal) les lui redonne. Sans effet sur un autre compte.
+   * @param {import('@mtcute/node').TelegramClient} tg
+   * @returns {Promise<boolean>} true si les droits ont été complétés.
+   */
+  async function ensureBotRights(tg) {
+    if (!enabled || !tg) return false;
+    const me = await api("getMe", {});
+    if (!me.ok) return false;
+    const member = await api("getChatMember", { chat_id: channel, user_id: me.result.id });
+    const rights = member.ok ? member.result : null;
+    if (rights?.status === "creator") return false;
+    if (rights?.status === "administrator" && rights.can_change_info && rights.can_post_messages && rights.can_edit_messages) {
+      return false;
+    }
+    try {
+      await tg.editAdminRights({ chatId: channel, userId: me.result.username, rights: BOT_RIGHTS, rank: "Red Packet" });
+      logger.info(`📣 Droits de @${me.result.username} complétés sur ${channel} (publier, nom, description, photo)`);
+      return true;
+    } catch (err) {
+      // Ce compte n'est pas propriétaire du canal (l'autre appareil le sera)
+      logger.debug(`📣 Droits du bot sur ${channel} non modifiés : ${err.message}`);
+      return false;
+    }
+  }
+
+  return { enabled, channel, describe, check, publish, flush, statsRows, setupChannel, ensureBotRights };
 }
 
 const fromEnv = (channel = process.env.PUBLISH_CHANNEL) =>
@@ -440,6 +478,7 @@ module.exports = {
    * Crée ton canal et y met ton bot (voir createPublisher). Les gains
    * suivants y sont publiés tout de suite, sans redémarrer le bot.
    */
+  ensureBotRights: (tg) => current.ensureBotRights(tg),
   setupChannel(tg, wanted) {
     // Deux appuis sur le bouton : un seul canal créé
     if (settingUp) return settingUp;

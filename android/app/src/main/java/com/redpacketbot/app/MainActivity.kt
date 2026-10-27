@@ -36,7 +36,7 @@ class MainActivity : ComponentActivity() {
 
     /** Écran demandé par un lien (notification, .env partagé), consommé par l'interface. */
     private val pendingRoute = mutableStateOf<String?>(null)
-    /** Contenu d'un .env reçu par « Partager » / « Ouvrir avec ». */
+    /** Contenu d'un .env ou d'une sauvegarde 🧳 reçu par « Partager » / « Ouvrir avec ». */
     private val importedEnv = mutableStateOf<String?>(null)
 
     private val notificationPermission =
@@ -103,7 +103,7 @@ class MainActivity : ComponentActivity() {
 
     private fun readUri(uri: Uri?): String? = uri?.let {
         runCatching {
-            contentResolver.openInputStream(it)?.use { stream -> stream.readBytes().take(200_000).toByteArray().decodeToString() }
+            contentResolver.openInputStream(it)?.use { stream -> stream.readBytes().take(Backup.MAX_BYTES).toByteArray().decodeToString() }
         }.getOrNull()
     }
 }

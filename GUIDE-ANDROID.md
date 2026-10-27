@@ -23,6 +23,7 @@ Compte environ **20 minutes** sur le téléphone la première fois, plus le temp
 8. [Au quotidien](#8-au-quotidien)
 9. [Le relais avec le PC](#9-le-relais-avec-le-pc)
 10. [Mettre à jour l'app](#10-mettre-à-jour-lapp)
+10 bis. [📵 Téléphone perdu ou volé : tout récupérer](#10-bis--téléphone-perdu-ou-volé--tout-récupérer)
 11. [Dépannage](#11-dépannage)
 12. [Désinstaller](#12-désinstaller)
 
@@ -351,6 +352,57 @@ Le PC et le téléphone utilisent **le même compte Binance** : un seul réclame
 4. Vérifie la version installée : elle s'affiche tout en bas de l'**🏠 Accueil** (par exemple « version 1.0.0 (404525) ») avec la date d'installation, et dans **⚙️ Réglages** → **ℹ️ À propos**. Le grand nombre augmente à chaque `npm run apk` : c'est le même que dans le nom du fichier `dist\RedPacketBot-1.0.0-404525.apk`. Le bot l'écrit aussi au début de ses logs (« 📱 App Android : version … »).
 
 Pense à mettre à jour le PC aussi (`npm install` si besoin, puis `npm start`).
+
+---
+
+## 10 bis. 📵 Téléphone perdu ou volé : tout récupérer
+
+**La sauvegarde 🧳.** Ton bot d'alertes t'envoie tout seul, dans sa discussion, un fichier `RedPacketBot-sauvegarde.rpb`, **épinglé**. Il le remplace :
+
+- à chaque changement de réglages ;
+- une fois par jour si tes gains, ton compteur anti-blocage ou ton historique ont bougé.
+
+Le fichier contient :
+
+- tous les réglages : canaux, X, anti-blocage, canal 📣, rôle ;
+- l'historique des codes, pour ne jamais retaper un code ;
+- le compteur anti-blocage ;
+- les gains et les stats ;
+- la devise.
+
+Il ne contient **ni** la session Telegram **ni** celle de Binance.
+
+Tout se règle dans **⚙️ Réglages** → **🧳 Sauvegarde** :
+
+- l'heure du dernier envoi ;
+- l'interrupteur **Envoi automatique** ;
+- **📤 Envoyer maintenant** ;
+- **💾 Exporter**, pour en ranger une copie ailleurs : Drive, e-mail ;
+- **📂 Restaurer**.
+
+> [!WARNING]
+> Le fichier contient tes secrets (jeton du bot, `API_HASH`), comme ton `.env`. Ne le transfère à personne.
+
+**1. D'abord, sécurise tes comptes** (depuis un autre appareil) :
+
+- **Telegram** → Paramètres → **Appareils** : termine les sessions du téléphone perdu, celle de l'appli Telegram et celle de « Red Packet Bot ».
+- **Binance** → Profil → Sécurité → **Gestion des appareils** : supprime le téléphone perdu.
+- **Téléphone volé ?** Dans @BotFather, `/revoke` donne un nouveau jeton à ton bot d'alertes. Mets-le ensuite dans l'app et dans le `.env` du PC (`ALERT_BOT_TOKEN`).
+
+**2. Sur le nouveau téléphone :**
+
+1. Installe l'APK (`dist/RedPacketBot.apk` sur le PC, [partie 3](#3-installer-lapk-sur-le-téléphone)).
+2. Ouvre **Telegram**, puis la discussion avec ton bot d'alertes. Touche le fichier épinglé **🧳 RedPacketBot-sauvegarde.rpb**, puis **Ouvrir avec** → **Red Packet Bot**. Tu peux aussi passer par l'assistant 🧭, étape ✈️ : **📂 Choisir le fichier**.
+3. L'app résume la sauvegarde (date, canaux, X, canal 📣, gains). Touche **🧳 Restaurer**.
+4. L'assistant 🧭 s'ouvre, champs déjà remplis. Il ne reste que ce qu'aucun fichier ne peut faire :
+   - la connexion Telegram (code reçu) ;
+   - la connexion Binance ;
+   - l'accès aux notifications pour X ;
+   - les réglages batterie et HiOS (écran 🩺 Santé) ;
+   - l'alerte de test.
+
+> [!NOTE]
+> Ton bot d'alertes nouveau (`/revoke`) ? La restauration remet l'ancien jeton : remplace-le dans **⚙️ Réglages** → **🔔 Alertes Telegram** avant de démarrer.
 
 ---
 
