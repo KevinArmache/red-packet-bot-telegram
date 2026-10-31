@@ -20,8 +20,26 @@ data class SquareEntry(
     val link: String,
     val firstAt: Long,
     val publishedAt: Long,
+    /** La question du quiz, lue sur Binance */
+    val quiz: String,
+    /** L'indice de Binance : presque toujours la réponse */
+    val hint: String,
+    /** open, runout (épuisé), expired, ou vide si jamais lu sur Binance */
+    val state: String,
+    val expiresAt: Long,
+    /** Heure où Binance a montré ce Red Packet comme pris par toi (0 : pas encore) */
+    val receivedAt: Long,
+    /** Nombre de parts du Red Packet */
+    val total: Long,
 ) {
+    /** Réponse donnée par un canal. */
     val answer: String get() = answers.firstOrNull()?.text.orEmpty()
+
+    /** Ce qu'il faut coller : la réponse d'un canal, sinon l'indice de Binance. */
+    val bestAnswer: String get() = answer.ifEmpty { hint }
+
+    /** Épuisé ou expiré, d'après Binance. */
+    fun finished(now: Long) = state == "runout" || state == "expired" || (expiresAt in 1..now)
 }
 
 /** Ce que tu as fait d'un Red Packet (bot-data/.run/square-marks.json, écrit par l'app seule). */
@@ -35,11 +53,15 @@ data class SquareLog(
     val marksStamp: Long = 0L,
 ) {
     /** TAKE, OPENED, WON ou DONE : la liste de l'onglet où ce Red Packet se trouve. */
-    fun listOf(entry: SquareEntry, now: Long = System.currentTimeMillis()): String = when (marks[entry.id]?.mark) {
-        MARK_OPENED -> OPENED
-        MARK_WON -> WON
-        MARK_MISSED, MARK_HIDDEN -> DONE
-        else -> if (now - entry.firstAt < TAKE_WINDOW_MS) TAKE else DONE
+    fun listOf(entry: SquareEntry, now: Long = System.currentTimeMillis()): String {
+        val mark = marks[entry.id]?.mark
+        return when {
+            entry.receivedAt > 0 || mark == MARK_WON -> WON
+            mark == MARK_MISSED || mark == MARK_HIDDEN || entry.finished(now) -> DONE
+            mark == MARK_OPENED -> OPENED
+            entry.expiresAt > 0 || now - entry.firstAt < TAKE_WINDOW_MS -> TAKE
+            else -> DONE
+        }
     }
 
     fun inList(list: String, now: Long = System.currentTimeMillis()) = items.filter { listOf(it, now) == list }
@@ -55,7 +77,7 @@ data class SquareLog(
         const val MARK_MISSED = "missed"
         const val MARK_HIDDEN = "hidden"
 
-        /** Le statut réel n'est pas lu sur Binance : sans nouvelle, un Red Packet sort de « À prendre ». Même valeur dans src/square.js. */
+        /** Statut jamais lu sur Binance : au-delà, un Red Packet sort de « À prendre ». Même valeur dans src/square.js. */
         private const val TAKE_WINDOW_MS = 24 * 3_600_000L
 
         fun read(file: File, marksFile: File, previous: SquareLog? = null): SquareLog {
@@ -95,6 +117,12 @@ data class SquareLog(
                         "?uc=app_square_share_link&us=copylink",
                     firstAt = e.optLong("firstAt"),
                     publishedAt = e.optLong("publishedAt"),
+                    quiz = e.optString("quiz"),
+                    hint = e.optString("hint"),
+                    state = e.optString("state"),
+                    expiresAt = e.optLong("expiresAt"),
+                    receivedAt = e.optLong("receivedAt"),
+                    total = e.optLong("total"),
                 )
             }
         }

@@ -63,6 +63,7 @@ data class SquareFilters(
     /** Nom du canal, ou vide */
     val source: String = "",
     val answerOnly: Boolean = false,
+    /** Ceux qui expirent bientôt d'abord, sinon les plus récents */
     val oldestFirst: Boolean = false,
 ) {
     val active: Int get() = listOf(type.isNotEmpty(), coin.isNotEmpty(), source.isNotEmpty(), answerOnly).count { it }
@@ -70,7 +71,7 @@ data class SquareFilters(
     fun matches(entry: SquareEntry): Boolean = when {
         type.isNotEmpty() && entry.type != type -> false
         source.isNotEmpty() && source !in entry.sources -> false
-        answerOnly && entry.answer.isEmpty() -> false
+        answerOnly && entry.bestAnswer.isEmpty() -> false
         coin == "other" && entry.coin in MAIN_COINS -> false
         coin.isNotEmpty() && coin != "other" && entry.coin != coin -> false
         else -> true
@@ -92,10 +93,10 @@ private val LISTS = listOf(
 
 /** Copie la réponse, puis ouvre le post dans l'appli Binance. */
 private fun openPost(context: Context, entry: SquareEntry) {
-    if (entry.answer.isNotEmpty()) {
+    if (entry.bestAnswer.isNotEmpty()) {
         context.getSystemService(ClipboardManager::class.java)
-            .setPrimaryClip(ClipData.newPlainText("Réponse Red Packet", entry.answer))
-        Toast.makeText(context, "📋 Réponse copiée : ${entry.answer}", Toast.LENGTH_SHORT).show()
+            .setPrimaryClip(ClipData.newPlainText("Réponse Red Packet", entry.bestAnswer))
+        Toast.makeText(context, "📋 Réponse copiée : ${entry.bestAnswer}", Toast.LENGTH_SHORT).show()
     }
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(entry.link))
     try {
@@ -126,7 +127,11 @@ fun SquareScreen(vm: BotViewModel) {
     var askingId by rememberSaveable { mutableStateOf<String?>(null) }
 
     val shown = log.inList(list, now).filter(filters::matches).let { entries ->
-        if (filters.oldestFirst) entries.sortedBy { it.firstAt } else entries.sortedByDescending { it.firstAt }
+        if (filters.oldestFirst) {
+            entries.sortedBy { if (it.expiresAt > 0) it.expiresAt else Long.MAX_VALUE }
+        } else {
+            entries.sortedByDescending { it.firstAt }
+        }
     }
     val toTake = log.inList(SquareLog.TAKE, now).filter(filters::matches).sortedBy { it.firstAt }
 
@@ -213,7 +218,7 @@ fun SquareScreen(vm: BotViewModel) {
                     onOpen = { open(entry) },
                     onCopy = {
                         context.getSystemService(ClipboardManager::class.java)
-                            .setPrimaryClip(ClipData.newPlainText("Réponse Red Packet", entry.answer))
+                            .setPrimaryClip(ClipData.newPlainText("Réponse Red Packet", entry.bestAnswer))
                         Toast.makeText(context, "📋 Réponse copiée", Toast.LENGTH_SHORT).show()
                     },
                     onMark = { mark -> vm.markSquare(entry.id, mark) },
@@ -236,7 +241,7 @@ fun SquareScreen(vm: BotViewModel) {
             title = { Text("🧧 Tu l'as pris ?") },
             text = {
                 Text(
-                    listOf(entry.coin, entry.answer).filter { it.isNotBlank() }.joinToString(" · ")
+                    listOf(entry.coin, entry.bestAnswer).filter { it.isNotBlank() }.joinToString(" · ")
                         .ifEmpty { "Red Packet ${entry.id}" },
                 )
             },
@@ -278,7 +283,7 @@ private fun FiltersPanel(log: SquareLog, filters: SquareFilters, onChange: (Squa
             for ((key, label) in listOf("USDT" to "USDT", "BNB" to "BNB", "other" to "Autres")) {
                 Choice(filters.coin == key, "💰 $label") { onChange(filters.copy(coin = if (filters.coin == key) "" else key)) }
             }
-            Choice(filters.oldestFirst, if (filters.oldestFirst) "⏳ Plus anciens d'abord" else "🆕 Plus récents d'abord") {
+            Choice(filters.oldestFirst, if (filters.oldestFirst) "⏳ Expire bientôt d'abord" else "🆕 Plus récents d'abord") {
                 onChange(filters.copy(oldestFirst = !filters.oldestFirst))
             }
         }
@@ -312,7 +317,12 @@ private fun SquareCard(
             Pill(typeLabel(entry.type), if (entry.type == "direct") AppColors.gold else AppColors.info)
             if (entry.coin.isNotBlank()) Pill(entry.coin, AppColors.success)
             Text(
-                Format.ago(entry.firstAt, now),
+                when {
+                    entry.state == "runout" -> "⚫ Épuisé"
+                    entry.finished(now) -> "⏳ Expiré"
+                    entry.expiresAt > 0 -> "⏳ encore ${Format.duration(entry.expiresAt - now)}"
+                    else -> Format.ago(entry.firstAt, now)
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -320,11 +330,15 @@ private fun SquareCard(
             )
         }
 
+        if (entry.quiz.isNotBlank()) {
+            Text("❓ ${entry.quiz}", style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        }
+
         when {
-            entry.answer.isNotEmpty() -> {
+            entry.bestAnswer.isNotEmpty() -> {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        entry.answer,
+                        entry.bestAnswer,
                         style = MonoStyle.copy(fontSize = 16.sp, lineHeight = 20.sp),
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -334,9 +348,10 @@ private fun SquareCard(
                     )
                     TextButton(onClick = onCopy) { Text("📋") }
                 }
-                val best = entry.answers.first()
+                val best = entry.answers.firstOrNull()
                 Hint(
                     when {
+                        best == null -> "🤔 Indice de Binance, sans confirmation d'un canal"
                         best.from.size > 1 -> "✅ Confirmée par ${best.from.size} canaux"
                         else -> "✅ Donnée par ${best.from.firstOrNull() ?: "un canal"}"
                     },
@@ -347,16 +362,24 @@ private fun SquareCard(
                         AppColors.warning,
                     )
                 }
+                // L'indice de Binance diffère de la réponse du canal : les deux sont utiles
+                if (best != null && entry.hint.isNotBlank() && !entry.hint.equals(best.text, ignoreCase = true)) {
+                    Hint("💡 Indice de Binance : ${entry.hint}")
+                }
             }
             entry.type == "direct" -> Hint("⚡ Pas de question : ouvre le post et réclame.")
             else -> Hint("❓ Réponse à trouver dans le post.")
         }
-        if (entry.amount.isNotBlank()) Hint("💰 Annoncé par le canal : ${entry.amount} ${entry.coin}".trim())
+        val details = listOfNotNull(
+            entry.amount.takeIf { it.isNotBlank() }?.let { "💰 Annoncé : $it ${entry.coin}".trim() },
+            entry.total.takeIf { it > 0 }?.let { "🎟️ ${Format.amount(it.toDouble())} parts" },
+        )
+        if (details.isNotEmpty()) Hint(details.joinToString(" · "))
 
         when (list) {
             SquareLog.TAKE, SquareLog.OPENED -> {
                 Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (entry.answer.isNotEmpty()) "🚀 Ouvrir et copier" else "🚀 Ouvrir dans Binance")
+                    Text(if (entry.bestAnswer.isNotEmpty()) "🚀 Ouvrir et copier" else "🚀 Ouvrir dans Binance")
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                     OutlinedButton(onClick = { onMark(SquareLog.MARK_WON) }, modifier = Modifier.weight(1f)) { Text("🏆 Pris") }
@@ -365,7 +388,7 @@ private fun SquareCard(
                 }
             }
             SquareLog.WON -> Hint(
-                when {
+                (if (entry.receivedAt > 0) "✅ Vu comme pris sur Binance · " else "") + when {
                     entry.publishedAt > 0 -> "📣 Publié sur ton canal"
                     publishChannel.isBlank() -> "📣 Aucun canal réglé : rien n'est publié"
                     else -> "📣 Publication en attente (le bot doit tourner)"

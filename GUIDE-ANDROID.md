@@ -292,8 +292,8 @@ Dans **Réglages → 🧧 Red Packets Binance Square**, `@Packet_Red` est déjà
 
 1. La notification « 🧧 N Red Packets à prendre » t'amène à l'onglet **🧧 Square**. Elle ne sonne qu'une fois, même si d'autres liens arrivent.
 2. Touche **🚀 Ouvrir et copier** : la réponse est copiée et Binance s'ouvre sur le post.
-3. Colle la réponse dans « Enter your answer », puis réclame.
-4. Reviens dans l'app : **🧧 Tu l'as pris ?** Réponds **🏆 Pris** ou **❌ Raté**.
+3. Colle la réponse. Binance peut te demander de suivre l'auteur, puis touche **Réclamer**.
+4. Reviens dans l'app : **🧧 Tu l'as pris ?** Réponds **🏆 Pris** ou **❌ Raté**. Si tu ne réponds pas, le bot voit quand même sur Binance que tu l'as pris, en une minute environ.
 
 **▶️ Enchaîner** ouvre les Red Packets l'un après l'autre, du plus ancien au plus récent : à chaque retour, tu réponds, et le suivant s'ouvre.
 
@@ -301,26 +301,31 @@ Dans **Réglages → 🧧 Red Packets Binance Square**, `@Packet_Red` est déjà
 
 | Liste | Ce qu'elle contient |
 |---|---|
-| 🟢 À prendre | Moins de 24 h, et rien fait dessus |
-| 👆 Ouverts | Ouverts dans Binance, sans réponse de ta part |
-| 🏆 Pris | Marqués « Pris » : publiés sur ton canal |
-| ⚫ Terminés | Ratés, masqués 🙈, ou plus de 24 h sans nouvelle |
+| 🟢 À prendre | Encore ouverts sur Binance, et rien fait dessus |
+| 👆 Ouverts | Ouverts dans Binance, pas encore pris |
+| 🏆 Pris | Vus comme pris sur Binance, ou marqués par toi : publiés sur ton canal |
+| ⚫ Terminés | Épuisés, expirés, ratés ou masqués 🙈 |
 
 **🎚️ Filtres** : 🎯 Quiz, ⚡ Direct (sans question), ✅ Réponse connue, crypto, canal, ordre. Ils restent en place d'une ouverture à l'autre. Sur chaque carte :
 
+- **❓ La question** et **⏳ le temps restant**, lus sur Binance ;
 - **✅ Donnée par @canal** : la réponse vient de ce canal ;
 - **✅ Confirmée par 2 canaux** : deux canaux donnent la même ;
-- **⚠️ Autre réponse donnée** : deux canaux ne sont pas d'accord, essaie celle du dessus ;
-- **❓ Réponse à trouver** : le lien est là, mais aucune réponse.
+- **🤔 Indice de Binance** : aucun canal n'a donné de réponse, l'indice en tient lieu ;
+- **💡 Indice de Binance** : il diffère de la réponse du canal, essaie-le si elle est refusée ;
+- **⚠️ Autre réponse donnée** : deux canaux ne sont pas d'accord.
 
 **4. Ton canal**
 
-Chaque **🏆 Pris** publie sur ton canal (⚙️ Réglages → 📣) le lien et la réponse. Le parrainage des autres est retiré du lien. Bot arrêté, la publication part à son redémarrage si ton « Pris » a moins de 24 h. Un post n'est jamais publié deux fois.
+Dès que Binance montre un Red Packet comme pris, ou que tu touches **🏆 Pris**, le lien et la réponse partent sur ton canal (⚙️ Réglages → 📣). Le parrainage des autres est retiré du lien. Bot arrêté, la publication part à son redémarrage si le gain a moins de 24 h. Un post n'est jamais publié deux fois.
+
+**5. La lecture sur Binance**
+
+Le bot lit l'état des Red Packets depuis sa page Binance, sans clic ni réponse : une petite lecture toutes les 30 s au plus, jamais pendant la réclamation d'un code. Si Binance refuse 3 fois de suite, elle s'arrête 30 min. Si Binance affiche un contrôle anti-robot, coupe **🔎 Lire le vrai statut sur Binance** dans les Réglages : l'onglet continue avec les seules infos de Telegram.
 
 **Limites, en toute honnêteté :**
 
-- L'app ne regarde pas Binance : elle ne sait pas si un Red Packet est épuisé avant que tu l'ouvres. Une carte peut donc mener à un Red Packet vide.
-- La crypto ne s'affiche que si le canal la donne (@Packet_Red écrit souvent `CLAIM ~`).
+- Le statut est relu toutes les 20 min environ : une carte peut mener à un Red Packet épuisé depuis peu.
 - Les comptes que tu suis sur Binance Square ne sont pas surveillés.
 
 ---

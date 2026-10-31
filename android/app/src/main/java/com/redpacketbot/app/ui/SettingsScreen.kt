@@ -196,10 +196,17 @@ fun SettingsScreen(vm: BotViewModel, importedEnv: MutableState<String?>, onNavig
                     SwitchRow(
                         "🧧",
                         "Lire les liens Binance Square",
-                        "Le bot ne fait rien sur Binance : tu ouvres le post et tu réponds.",
+                        "Tu ouvres le post et tu réponds : le bot ne clique jamais sur Binance.",
                         draft.squareEnabled,
                     ) { draft = draft.copy(squareEnabled = it) }
                     if (draft.squareEnabled) {
+                        SwitchRow(
+                            "🔎",
+                            "Lire le vrai statut sur Binance",
+                            "Question, indice, épuisé, déjà pris : une petite lecture par post, sans clic. " +
+                                "Coupe-la si Binance affiche un contrôle.",
+                            draft.squareCheck,
+                        ) { draft = draft.copy(squareCheck = it) }
                         SettingField(
                             "Canaux de liens (un par ligne)",
                             draft.squareChannels,

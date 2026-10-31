@@ -583,6 +583,54 @@ async function main() {
       [],
     );
     check("« Raté » : jamais publié", square.winsToPublish(items, { 1: { mark: "missed", at: NOW } }, NOW), []);
+    // État lu sur Binance (champs relevés le 31/10/2026)
+    const info = (fields = {}) => ({
+      expiredTime: NOW + 10 * HOUR_MS,
+      currency: "USD1",
+      number: 9999,
+      type: 1,
+      quiz: "My english name?",
+      answerHint: " COLE ",
+      isRunOut: false,
+      isReceivedByCurrentUser: false,
+      isExpired: false,
+      ...fields,
+    });
+    const fresh = () => see(undefined, "", "@Packet_Red", NOW - HOUR_MS);
+    const read = square.applyInfo(fresh(), info(), NOW);
+    check(
+      "Binance complète la carte : crypto, question, indice, parts",
+      [read.coin, read.quiz, read.hint, read.total, read.type, read.state, read.checkedAt],
+      ["USD1", "My english name?", "COLE", 9999, "quiz", "open", NOW],
+    );
+    check("type 2 : sans question", square.applyInfo(fresh(), info({ type: 2 }), NOW).type, "direct");
+    check("Binance prime sur un canal : épuisé", square.applyInfo(fresh(), info({ isRunOut: true }), NOW).state, "runout");
+    check("expiré", square.applyInfo(fresh(), info({ isExpired: true }), NOW).state, "expired");
+    check("après lecture, un canal ne change plus le type", see(square.applyInfo(fresh(), info({ type: 2 }), NOW), "SOL", "@b").type, "direct");
+    check("résumé avec l'indice de Binance", square.describeItem(read), "USD1 · réponse : COLE");
+
+    const taken = square.applyInfo(fresh(), info({ isReceivedByCurrentUser: true }), NOW);
+    check("pris sur Binance : noté une seule fois", square.applyInfo(taken, info({ isReceivedByCurrentUser: true }), NOW + 5).receivedAt, NOW);
+    check("pris sur Binance : à publier sans marque", square.winsToPublish([taken], {}, NOW).length, 1);
+    check("pris sur Binance : plus à prendre", square.takeList([taken], {}, NOW), []);
+    check("déjà publié : jamais republié", square.winsToPublish([{ ...taken, publishedAt: NOW }], {}, NOW), []);
+
+    const longLife = square.applyInfo(see(undefined, "", "@a", NOW - 30 * HOUR_MS), info({ expiredTime: NOW + 40 * HOUR_MS }), NOW);
+    check("date connue : à prendre au-delà de 24 h", square.takeList([longLife], {}, NOW).length, 1);
+    check("date dépassée : terminé", square.isFinished({ state: "open", expiresAt: NOW - 1 }, NOW), true);
+    check("épuisé : plus à prendre", square.takeList([square.applyInfo(fresh(), info({ isRunOut: true }), NOW)], {}, NOW), []);
+
+    const pick = (list, picked = {}) => square.nextToCheck(list, picked, NOW)?.id ?? null;
+    const row = (id, fields = {}) => ({ id, firstAt: NOW - HOUR_MS, checkedAt: 0, receivedAt: 0, state: "", expiresAt: 0, ...fields });
+    check("jamais lu : d'abord", pick([row("a", { checkedAt: NOW - 30 * 60_000 }), row("b")]), "b");
+    check("ouvert à l'instant : avant tout", pick([row("a"), row("b", { checkedAt: NOW - 90_000 })], { b: { mark: "opened", at: NOW - 60_000 } }), "b");
+    check("ouvert, relu il y a 10 s : pas encore", pick([row("b", { checkedAt: NOW - 10_000 })], { b: { mark: "opened", at: NOW - 60_000 } }), null);
+    check("ouvert il y a plus de 15 min : plus de relecture rapide", pick([row("b", { checkedAt: NOW - 90_000 })], { b: { mark: "opened", at: NOW - 16 * 60_000 } }), null);
+    check("ouvert puis laissé de côté : relu au rythme lent", pick([row("b", { checkedAt: NOW - 25 * 60_000 })], { b: { mark: "opened", at: NOW - 30 * 60_000 } }), "b");
+    check("le plus ancien relevé", pick([row("a", { checkedAt: NOW - 25 * 60_000 }), row("b", { checkedAt: NOW - 40 * 60_000 })]), "b");
+    check("relevé récent : rien à relire", pick([row("a", { checkedAt: NOW - 60_000 })]), null);
+    check("épuisé, pris ou masqué : jamais relu", pick([row("a", { state: "runout" }), row("b", { receivedAt: NOW }), row("c")], { c: { mark: "hidden", at: NOW } }), null);
+
     check("résumé d'un quiz", square.describeItem({ coin: "USDT", type: "quiz", answers: [{ text: "SOL", from: [] }] }), "USDT · réponse : SOL");
     check("résumé sans question", square.describeItem({ coin: "PEPE", type: "direct", answers: [] }), "PEPE · sans question");
   }

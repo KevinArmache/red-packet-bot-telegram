@@ -838,21 +838,34 @@ Aucune ligne `Code trouvé` ne doit venir de ces canaux.
 
 - `src/square.js` lit les messages, fusionne par numéro de post, écrit `.run/square.json`.
 - L'app écrit `.run/square-marks.json` (« Pris », « Raté »…), le bot le relit à chaque marque (`square.mark`) et au démarrage, et publie les gains.
-- Le statut réel n'est pas lu sur Binance : 24 h sans marque, et la carte passe dans « Terminés » (`TAKE_WINDOW_MS`, dans `square.js` et `SquareLog.kt`).
+- Le bot lit l'état de chaque Red Packet (`readSquarePost` de `src/binance.js`, `SQUARE_CHECK`) : une lecture toutes les 30 s au plus, sans navigation, jamais pendant la réclamation d'un code, une reconnexion ou une pause. 3 refus de Binance d'affilée : pause de 30 min. Il ne clique jamais et ne répond jamais.
+- Dès que Binance montre un Red Packet comme pris (`isReceivedByCurrentUser`), la carte passe dans « Pris » et le lien part sur le canal, sans toucher au bouton.
+- Si le statut n'a jamais pu être lu : 24 h sans marque, et la carte passe dans « Terminés » (`TAKE_WINDOW_MS`, dans `square.js` et `SquareLog.kt`).
+
+### Le déroulé d'un Red Packet Quiz
+
+Relevé le 31/10/2026, sur 3 réclamations faites à la main par Kevin dans l'appli Binance, les données lues et le code public du site :
+
+1. Le lien Telegram ouvre le post.
+2. La réponse passe par la zone de commentaires.
+3. Binance la vérifie. Une page demande de suivre l'auteur si ce n'est pas déjà fait.
+4. Bouton Réclamer : `POST /bapi/composite/v1/private/pgc/claim/content-related-red-envelop/<id>`. Binance peut exiger un captcha (`needCaptchaVerification`).
+5. `isReceivedByCurrentUser` et `isEligibleForCurrentUser` passent à `true`.
+
+Le site charge `se_new.min.js` et le lie à cette adresse (`window.hkAPIs`) : un script de sécurité dédié à la réclamation. Ne pas chercher à le lire pour le contourner.
 
 ### Ce qu'on sait du Red Packet Quiz
-
-Relevé le 31/10/2026. **Le bot ne se sert de rien de tout ça** : il ne lit pas Binance.
 
 - `cpos` : post court, `cart` : article.
 - Sur 13 posts, un seul n'avait pas de question : `CLAIM BOX` chez @Packet_Red veut dire « pas de question ».
 - Dans le code public du site, le post contient un bloc `redEnvelop` : `type` (1 : quiz, 2 : sans question), `quiz` (la question), `answerHint` (l'indice, presque toujours la réponse), `currency`, `expiredTime`, `isRunOut`, `isExpired`, `isReceivedByCurrentUser`.
 - La réponse passe par la zone de commentaires, puis une fenêtre « Bonne réponse » propose de réclamer.
 - La réclamation peut exiger un captcha (`needCaptchaVerification`).
-- Dans le code lu, le follow n'est consulté qu'après la réclamation, pour la fenêtre de succès. Sur les 13 posts, aucun champ ne l'impose : il apparaît seulement dans le texte d'une question. À confirmer sur un vrai cas.
+- Le follow est demandé avant le bouton Réclamer dans l'appli (vu par Kevin), alors que le code du site ne le consulte qu'après la réclamation. Aucun champ lu ne dit s'il est obligatoire : ne pas se fier au seul code du site.
 - Le mot « Expired » d'une page publique est un libellé caché par le style : ne pas le lire comme un statut.
 - Lecture légère depuis la page connectée : `GET /bapi/composite/v1/friendly/pgc/query/content-related-red-envelop/<id>`, 484 octets contre 290 Ko pour la page du post. Elle donne la question, l'indice, la crypto, le nombre de parts (`number` : 3 000 à 10 000 relevés), `expiredTime`, `isRunOut`.
-- `isEligibleForCurrentUser` vaut `false` sur les 3 posts ouverts lus, y compris avec l'en-tête `csrftoken` (MD5 du cookie `cr00`). Le site ne s'en sert pas : sens inconnu. Une réclamation à la main dira s'il bloque vraiment, et si `isReceivedByCurrentUser` passe à `true`.
+- `isReceivedByCurrentUser` ne dit vrai qu'avec l'en-tête `csrftoken` (MD5 du cookie `cr00`) : sans lui, il vaut toujours `false`.
+- `isEligibleForCurrentUser` vaut `false` sur un post ouvert non réclamé, `true` sur les 3 réclamés : ce n'est pas un blocage du compte. On ne sait pas encore à quelle étape il change.
 - Fil Following : `POST /bapi/composite/v4/friendly/pgc/feed/follow-feed-recommend/list` répond `000002 illegal parameter` avec le corps lu dans le code du site, avec ou sans `csrftoken`. Non résolu. Ne pas insister à l'aveugle avec la session de Kevin.
 
 ### Pièges
@@ -860,3 +873,4 @@ Relevé le 31/10/2026. **Le bot ne se sert de rien de tout ça** : il ne lit pas
 - **Binance bloque les lectures automatiques.** `curl` reçoit un statut 202 vide et un navigateur anonyme une erreur 403 de CloudFront. Le Chromium du PC, ouvert par un script le 31/10, a affiché un contrôle anti-robot. Ne cherche pas à passer ces contrôles.
 - **Pilotage du navigateur du téléphone depuis le PC** (`adb forward` vers `webview_devtools_remote_*`) : refusé par les autorisations de Claude Code le 31/10 (« Website Access Circumvention »), puis autorisé par Kevin pour un test en lecture seule (règle `Bash(node phone-read.js:*)`, lancée depuis le dossier du projet). Ce n'est pas une autorisation générale : à chaque nouvelle étape, sa décision d'abord. Ne jamais faire naviguer la page de réclamation : elle sert aux codes.
 - Une réponse peut être en plusieurs langues ou contenir des émojis : `parseAnswer` garde le texte exact du monospace.
+- Le 31/10 à 13:37, juste après une installation, la page Binance n'a pas démarré (`connectOverCDP: WebSocket error: socket hang up`, 3 fois) et le bot est resté arrêté plus de 3 min. Cause non trouvée, sans lien avec Square : `am start -S -n com.redpacketbot.app/.MainActivity` l'a relancé. D'où la règle : toujours vérifier `status=running` après une installation.

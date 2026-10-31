@@ -35,6 +35,7 @@ data class BotConfig(
     // 🧧 Binance Square : liens et réponses repérés sur Telegram (src/square.js)
     val squareEnabled: Boolean = true,
     val squareChannels: String = DEFAULT_SQUARE_CHANNELS,
+    val squareCheck: Boolean = true,
 ) {
     /** Canaux, un par entrée (virgules ou retours à la ligne acceptés). */
     val channelList: List<String>
@@ -189,6 +190,7 @@ data class BotConfig(
         put("X_DRY_RUN", xDryRun.toString())
         put("SQUARE_ENABLED", squareEnabled.toString())
         put("SQUARE_CHANNELS", squareChannelList.joinToString(",") { normalizedChannel(it) })
+        put("SQUARE_CHECK", squareCheck.toString())
     }
 
     fun toJson(): JSONObject = JSONObject().apply {
@@ -215,6 +217,7 @@ data class BotConfig(
         put("xDryRun", xDryRun)
         put("squareEnabled", squareEnabled)
         put("squareChannels", squareChannels)
+        put("squareCheck", squareCheck)
     }
 
     fun save(file: File) = file.writeTextAtomic(toJson().toString(2))
@@ -252,6 +255,7 @@ data class BotConfig(
             squareChannels = env["SQUARE_CHANNELS"]?.takeIf { it.isNotBlank() }
                 ?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.joinToString(",\n")
                 ?: squareChannels,
+            squareCheck = env["SQUARE_CHECK"]?.let { it.trim().lowercase() != "false" } ?: squareCheck,
         )
     }
 
@@ -305,6 +309,7 @@ data class BotConfig(
             xDryRun = o.optBoolean("xDryRun", false),
             squareEnabled = o.optBoolean("squareEnabled", true),
             squareChannels = o.optString("squareChannels", DEFAULT_SQUARE_CHANNELS),
+            squareCheck = o.optBoolean("squareCheck", true),
         )
 
         /** Lecture d'un fichier .env : CLÉ=valeur, commentaires #, guillemets. */

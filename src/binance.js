@@ -21,6 +21,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const logger = require('./logger');
 const { ANDROID_APP } = require('./platform');
 const { dataPath } = require('./paths');
@@ -1534,6 +1535,46 @@ async function claimOnce(code, opts) {
   }
 }
 
+// ─── Red Packets de Binance Square : lecture seule ──────────────────────────
+
+const SQUARE_INFO_PATH = '/bapi/composite/v1/friendly/pgc/query/content-related-red-envelop/';
+const SQUARE_READ_TIMEOUT_MS = 15000;
+
+/**
+ * État d'un Red Packet de Square, lu depuis la page déjà ouverte : elle ne
+ * navigue pas, rien n'est cliqué ni envoyé. Le csrftoken (MD5 du cookie cr00,
+ * comme le site) fait reconnaître ton compte : sans lui, Binance répond
+ * toujours « pas encore pris ».
+ * @param {string} id - numéro du post
+ * @returns {Promise<object|null>} champs du Red Packet, { refused } si Binance
+ *   refuse, null si la lecture est à refaire plus tard (page occupée, pas prête).
+ */
+async function readSquarePost(id) {
+  const page = cryptoboxPage;
+  if (!/^\d{5,20}$/.test(String(id)) || !page || page.isClosed()) return null;
+  if (claiming || sessionRecovery || awaitingLogin || Date.now() < pauseUntil) return null;
+  try {
+    const session = await page.evaluate(() => {
+      const read = (name) => (new RegExp(`(?:^|; )${name}=([^;]*)`).exec(document.cookie) || [])[1] || '';
+      return { cr00: read('cr00'), uuid: read('bnc-uuid') };
+    });
+    const headers = {
+      clienttype: 'web',
+      lang: 'fr',
+      csrftoken: crypto.createHash('md5').update(session.cr00).digest('hex'),
+      'bnc-uuid': session.uuid,
+    };
+    return await page.evaluate(async ({ url, headers, timeout }) => {
+      const res = await fetch(url, { credentials: 'include', headers, signal: AbortSignal.timeout(timeout) });
+      if (!res.ok) return { refused: `HTTP ${res.status}` };
+      const body = await res.json().catch(() => null);
+      return body?.success && body.data ? body.data : { refused: body?.code ?? 'réponse illisible' };
+    }, { url: `${SQUARE_INFO_PATH}${id}`, headers, timeout: SQUARE_READ_TIMEOUT_MS });
+  } catch (_) {
+    return null; // page en navigation : prochain passage
+  }
+}
+
 async function closeBrowser() {
   // Annule aussi un lancement ou une attente de connexion en cours
   initGen++;
@@ -1552,6 +1593,7 @@ async function closeBrowser() {
 module.exports = {
   initBrowser,
   claimCode,
+  readSquarePost,
   closeBrowser,
   getStatus,
   setPauseUntil,

@@ -9,9 +9,11 @@
  * ║  ces messages, réunit par numéro de post ce que disent les canaux et     ║
  * ║  garde le tout pour l'onglet 🧧 Square de l'app.                         ║
  * ║                                                                          ║
- * ║  Rien n'est fait sur Binance : les règles de Square interdisent les      ║
- * ║  bots, c'est donc toi qui ouvres le post et qui réponds. Quand tu        ║
- * ║  touches « 🏆 Pris », le lien et la réponse partent sur ton canal.       ║
+ * ║  Le bot lit l'état de chaque Red Packet depuis sa page Binance           ║
+ * ║  (question, indice, épuisé, déjà pris), sans jamais cliquer ni répondre :║
+ * ║  les règles de Square interdisent les bots. C'est toi qui ouvres le post ║
+ * ║  et qui réponds. Dès que Binance le marque pris, le lien et la réponse   ║
+ * ║  partent sur ton canal.                                                  ║
  * ╚══════════════════════════════════════════════════════════════════════════╝
  *
  * Deux fichiers à côté du signe de vie (écrits seulement dans l'app) :
@@ -32,11 +34,19 @@ const MAX_AGE_MS = 7 * 24 * HOUR;
 const MAX_ANSWERS = 5;
 const MAX_SOURCES = 8;
 const MAX_ANSWER_LENGTH = 120;
-// Sans nouvelle au-delà, un Red Packet quitte « À prendre » (le statut réel
-// n'est pas lu sur Binance). Même valeur dans SquareLog.kt.
+// Statut jamais lu sur Binance : au-delà, un Red Packet quitte « À prendre ».
+// Même valeur dans SquareLog.kt.
 const TAKE_WINDOW_MS = 24 * HOUR;
 // Gain marqué bot arrêté : publié au démarrage s'il est plus récent
 const PUBLISH_WINDOW_MS = 24 * HOUR;
+
+// Lecture de l'état sur Binance : une seule à la fois, très espacées
+const CHECK_TICK_MS = 30_000;
+const RECHECK_MS = 20 * 60_000; // Red Packet à prendre
+const OPENED_RECHECK_MS = 60_000; // ouvert dans Binance : pris ou pas ?
+const OPENED_WATCH_MS = 15 * 60_000;
+const MAX_CHECK_ERRORS = 3;
+const CHECK_PAUSE_MS = 30 * 60_000;
 
 const truthy = (raw, fallback) => {
   const value = String(raw ?? "").trim().toLowerCase();
@@ -50,6 +60,8 @@ const FILE = RUN_DIR ? path.join(RUN_DIR, "square.json") : "";
 const MARKS_FILE = RUN_DIR ? path.join(RUN_DIR, "square-marks.json") : "";
 
 const ENABLED = truthy(process.env.SQUARE_ENABLED, true);
+/** Lire l'état des Red Packets sur Binance (app Android seulement). */
+const CHECK = ENABLED && Boolean(FILE) && truthy(process.env.SQUARE_CHECK, true);
 /** Canaux de liens : écoutés, jamais une source de codes (src/telegram.js). */
 const CHANNELS = ENABLED
   ? String(process.env.SQUARE_CHANNELS ?? "").split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean)
@@ -167,6 +179,13 @@ function mergeSighting(item, sighting, channel, at) {
     firstAt: at,
     lastAt: at,
     publishedAt: 0,
+    checkedAt: 0,
+    receivedAt: 0,
+    state: "",
+    quiz: "",
+    hint: "",
+    total: 0,
+    expiresAt: 0,
   };
   next.lastAt = Math.max(next.lastAt, at);
   next.coin = next.coin || sighting.coin;
@@ -183,28 +202,82 @@ function mergeSighting(item, sighting, channel, at) {
     if (entry && channel && !entry.from.includes(channel)) entry.from.push(channel);
     next.answers.sort((a, b) => b.from.length - a.from.length);
   }
-  // Une vraie réponse prouve le quiz, même si un autre canal a écrit « CLAIM BOX »
-  next.type = next.answers.length > 0 ? "quiz" : next.type || sighting.type;
+  // Une vraie réponse prouve le quiz, même si un autre canal a écrit « CLAIM BOX ».
+  // Une fois lu sur Binance, le type n'est plus deviné.
+  if (!next.checkedAt) next.type = next.answers.length > 0 ? "quiz" : next.type || sighting.type;
   if (channel && !next.sources.includes(channel) && next.sources.length < MAX_SOURCES) next.sources.push(channel);
   return next;
 }
 
-/** Red Packets encore à prendre : récents et sans marque de ta part. */
-function takeList(items, marks, now) {
-  return items.filter((item) => !marks[item.id] && now - item.firstAt < TAKE_WINDOW_MS);
+const textOf = (value) => String(value ?? "").trim().slice(0, MAX_ANSWER_LENGTH);
+
+/**
+ * Ajoute à un Red Packet ce que Binance en dit (voir readSquarePost). Binance
+ * prime sur les canaux. `type` 1 : quiz, 2 : sans question.
+ * @returns {object} item, complété
+ */
+function applyInfo(item, info, now) {
+  item.checkedAt = now;
+  item.coin = textOf(info.currency).toUpperCase() || item.coin;
+  item.quiz = textOf(info.quiz);
+  item.hint = textOf(info.answerHint);
+  item.total = Number(info.number) || item.total || 0;
+  item.expiresAt = Number(info.expiredTime) || item.expiresAt || 0;
+  if (info.type === 1) item.type = "quiz";
+  else if (info.type === 2) item.type = "direct";
+  item.state = info.isRunOut ? "runout" : info.isExpired ? "expired" : "open";
+  if (info.isReceivedByCurrentUser && !item.receivedAt) item.receivedAt = now;
+  return item;
 }
 
-/** Red Packets marqués « Pris » récemment, pas encore publiés. */
+/** Plus rien à prendre : épuisé ou expiré, d'après Binance. */
+function isFinished(item, now) {
+  return item.state === "runout" || item.state === "expired" || (item.expiresAt > 0 && item.expiresAt <= now);
+}
+
+/** Red Packets encore à prendre, d'après Binance et tes marques. */
+function takeList(items, marks, now) {
+  return items.filter((item) => {
+    if (marks[item.id] || item.receivedAt || isFinished(item, now)) return false;
+    return item.expiresAt > 0 || now - item.firstAt < TAKE_WINDOW_MS;
+  });
+}
+
+/** Red Packets pris (vu sur Binance, ou marqué par toi) pas encore publiés. */
 function winsToPublish(items, marks, now) {
   return items.filter((item) => {
+    if (item.publishedAt) return false;
     const mark = marks[item.id];
-    return mark?.mark === "won" && !item.publishedAt && now - (mark.at || 0) < PUBLISH_WINDOW_MS;
+    const at = item.receivedAt || (mark?.mark === "won" ? mark.at || 0 : 0);
+    return at > 0 && now - at < PUBLISH_WINDOW_MS;
   });
+}
+
+/**
+ * Prochain Red Packet à relire sur Binance : d'abord celui que tu viens d'ouvrir
+ * (pris ou pas ?), puis les jamais lus, puis le plus ancien relevé.
+ */
+function nextToCheck(items, marks, now) {
+  const live = items.filter((item) => !item.receivedAt && !isFinished(item, now));
+  const opened = live.find((item) => {
+    const mark = marks[item.id];
+    return mark?.mark === "opened" && now - mark.at < OPENED_WATCH_MS && now - item.checkedAt >= OPENED_RECHECK_MS;
+  });
+  if (opened) return opened;
+  // Ouvert puis laissé de côté : relu au rythme lent, il peut encore être pris
+  const waiting = live.filter((item) => !marks[item.id] || marks[item.id].mark === "opened");
+  return (
+    waiting.find((item) => !item.checkedAt) ??
+    waiting
+      .filter((item) => now - item.checkedAt >= RECHECK_MS)
+      .sort((a, b) => a.checkedAt - b.checkedAt)[0] ??
+    null
+  );
 }
 
 /** « USDT · réponse : SOL », pour les logs et la notification. */
 function describeItem(item) {
-  const answer = item.answers?.[0]?.text;
+  const answer = item.answers?.[0]?.text || item.hint;
   const what = item.type === "direct" ? "sans question" : answer ? `réponse : ${answer}` : "réponse à trouver";
   return [item.coin, what].filter(Boolean).join(" · ");
 }
@@ -223,6 +296,11 @@ let seen = 0;
 let listening = false;
 /** @type {((item: object) => boolean) | null} */
 let publish = null;
+/** @type {((id: string) => Promise<object|null>) | null} */
+let readPost = null;
+let checking = false;
+let checkErrors = 0;
+let checkPausedUntil = 0;
 
 function writeNow() {
   saveTimer = null;
@@ -291,10 +369,41 @@ function announce() {
 function publishWins() {
   if (!publish) return;
   for (const item of winsToPublish(data.items, readMarks(), Date.now())) {
-    const sent = publish({ ...item, answer: item.answers[0]?.text ?? "", link: cleanLink(item) });
+    const sent = publish({ ...item, answer: item.answers[0]?.text || item.hint, link: cleanLink(item) });
     if (sent) item.publishedAt = Date.now();
   }
   save();
+}
+
+/** Relit un Red Packet sur Binance. Refus répétés : tout s'arrête 30 min. */
+async function checkNext() {
+  if (checking || !readPost || Date.now() < checkPausedUntil) return;
+  const item = nextToCheck(data.items, readMarks(), Date.now());
+  if (!item) return;
+  checking = true;
+  try {
+    const info = await readPost(item.id);
+    if (!info) return; // page occupée ou pas prête : prochain passage
+    if (info.refused !== undefined) {
+      checkErrors++;
+      logger.debug(`🧧 Lecture de ${item.id} refusée par Binance : ${info.refused}`);
+      if (checkErrors >= MAX_CHECK_ERRORS) {
+        checkErrors = 0;
+        checkPausedUntil = Date.now() + CHECK_PAUSE_MS;
+        logger.warn(`🧧 Binance refuse les lectures Square (${info.refused}) : pause de 30 min`);
+      }
+      return;
+    }
+    checkErrors = 0;
+    const known = item.receivedAt;
+    applyInfo(item, info, Date.now());
+    if (item.receivedAt && !known) logger.success(`🧧 Red Packet Square pris : ${describeItem(item)}`);
+    save();
+    publishWins();
+    announce();
+  } finally {
+    checking = false;
+  }
 }
 
 /**
@@ -323,13 +432,20 @@ function handle(sources, meta = {}) {
 
 /**
  * Démarre l'onglet Square.
- * @param {{ publish: (item: object) => boolean }} options
+ * @param {{ publish: (item: object) => boolean, readPost?: (id: string) => Promise<object|null> }} options
  *   publish : poste un gain sur ton canal, false si aucun canal n'est réglé.
+ *   readPost : état d'un Red Packet sur Binance (src/binance.js).
  */
 function start(options) {
   publish = options.publish;
   const host = globalThis.__rpbHost;
   if (!ENABLED) return;
+  if (CHECK && options.readPost && !readPost) {
+    readPost = options.readPost;
+    setInterval(() => {
+      checkNext().catch((err) => logger.error(`💥 🧧 Lecture Square : ${err.message}`));
+    }, CHECK_TICK_MS).unref?.();
+  }
   if (host && !listening) {
     listening = true;
     host.on("square.mark", () => {
@@ -347,9 +463,8 @@ function start(options) {
 
 function describe() {
   if (!ENABLED) return "désactivé (SQUARE_ENABLED=false)";
-  return CHANNELS.length > 0
-    ? `liens lus sur ${CHANNELS.join(", ")}, et dans tes canaux de codes`
-    : "liens lus dans tes canaux de codes";
+  const where = CHANNELS.length > 0 ? `liens lus sur ${CHANNELS.join(", ")}, et dans tes canaux de codes` : "liens lus dans tes canaux de codes";
+  return `${where}${CHECK ? " · état lu sur Binance" : ""}`;
 }
 
 /** Lignes du bilan d'activité. */
@@ -374,7 +489,10 @@ module.exports = {
   parseAnswer,
   parseMessage,
   mergeSighting,
+  applyInfo,
+  isFinished,
   takeList,
   winsToPublish,
+  nextToCheck,
   describeItem,
 };

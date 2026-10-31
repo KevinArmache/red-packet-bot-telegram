@@ -392,20 +392,20 @@ Certains Red Packets n'ont pas de code : ils sont attachés à un post ou à un 
 | Durée de vie | Quelques minutes | De 1 à 7 jours d'après les posts relevés, sauf épuisement avant |
 | Qui agit | Le bot | Toi |
 
-**Le bot n'agit pas sur Binance Square.** Les règles de Square interdisent les bots (« Using bots… to generate interactions ») et la réponse passe par la zone de commentaires. Il fait tout le reste :
+**Le bot ne clique jamais sur Binance Square.** Les règles de Square interdisent les bots (« Using bots… to generate interactions ») et la réponse passe par la zone de commentaires. Il fait tout le reste :
 
 1. il lit les liens et les réponses sur Telegram ;
 2. il réunit par numéro de post ce que disent les canaux : deux canaux, une seule carte, réponse « confirmée » ;
-3. il range le tout dans l'onglet **🧧 Square** de l'app, avec une seule notification ;
-4. tu touches **🚀 Ouvrir et copier** : Binance s'ouvre sur le post, la réponse est dans le presse-papiers ;
-5. au retour, tu touches **🏆 Pris** : le lien et la réponse partent sur ton canal.
+3. il lit sur Binance la question, l'indice, la date de fin, et si le Red Packet est épuisé ou déjà pris (`SQUARE_CHECK`) ;
+4. il range le tout dans l'onglet **🧧 Square** de l'app, avec une seule notification ;
+5. tu touches **🚀 Ouvrir et copier** : Binance s'ouvre sur le post, la réponse est dans le presse-papiers. Binance peut te demander de suivre l'auteur avant le bouton Réclamer ;
+6. dès que Binance le montre comme pris, le lien et la réponse partent sur ton canal, sans rien toucher.
 
 **Jamais de faux codes.** Le parrainage d'un lien (`r=K1H0AFHZ`) et la réponse en monospace ressemblent à des codes : ils auraient fait monter le compteur anti-blocage. Un message avec un lien Square ne garde que les codes explicites (lien Cryptobox, « Code : »), et les canaux de `SQUARE_CHANNELS` ne sont jamais lus comme des canaux de codes.
 
 **Limites, en toute honnêteté :**
 
-- Le statut réel d'un Red Packet n'est pas lu sur Binance : au bout de 24 h sans marque de ta part, il passe dans « Terminés ». Il peut être épuisé bien avant.
-- La crypto n'apparaît que si le canal la donne : @Packet_Red écrit souvent `CLAIM ~` sans la nommer.
+- Le statut est relu toutes les 20 min environ : une carte peut mener à un Red Packet épuisé depuis peu.
 - Les comptes que tu suis sur Binance Square ne sont pas surveillés.
 - Les gains sont modestes : de 0,001 à 0,0025 USDT par post sur 4 montants relevés.
 
@@ -469,6 +469,7 @@ Voir [🧧 Red Packets de Binance Square](#-red-packets-de-binance-square). Sur 
 
 - **`SQUARE_ENABLED`** — défaut `true`. Lire les liens Binance Square.
 - **`SQUARE_CHANNELS`** — vide par défaut sur le PC, `@Packet_Red` dans l'app. Canaux de liens, séparés par des virgules : jamais lus comme des canaux de codes, et leurs 20 derniers messages sont relus au démarrage. Le compte doit y être abonné pour recevoir les nouveaux messages.
+- **`SQUARE_CHECK`** — défaut `true`, dans l'app seulement. Lire l'état des Red Packets sur Binance depuis la page déjà ouverte, sans clic ni réponse. À couper si Binance affiche un contrôle anti-robot.
 
 ### Navigateur et Binance
 

@@ -1017,7 +1017,7 @@ async function main() {
   history.cleanOldCodes();
   activity.load();
   square.load();
-  square.start({ publish: publisher.publishSquare });
+  square.start({ publish: publisher.publishSquare, readPost: binance.readSquarePost });
   antiban.setHooks({ onChange: onAntibanChange });
   const saved = antiban.init();
   if (saved.pauseUntil > Date.now()) {
