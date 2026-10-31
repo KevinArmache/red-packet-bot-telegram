@@ -30,6 +30,7 @@ const relay = require("./src/relay");
 const antiban = require("./src/antiban");
 const activity = require("./src/activity");
 const xsource = require("./src/xsource");
+const square = require("./src/square");
 const { hints, ANDROID_APP } = require("./src/platform");
 const binance = require("./src/binance");
 const { startTelegramClient, loginTelegram, isAuthDeadError } = require("./src/telegram");
@@ -95,6 +96,7 @@ function parseTargetChannels() {
 function printStats(title = "📊 Bilan d'activité") {
   const { rows } = stats.snapshot([
     ...xsource.statsRows(),
+    ...square.statsRows(),
     ...publisher.statsRows(),
     ...antiban.statsRows(),
     ...relay.statsRows(),
@@ -818,6 +820,7 @@ function setupGlobalErrorHandlers() {
 
     printStats("📊 Bilan final");
     activity.flush();
+    square.flush();
     await binance.closeBrowser();
     logger.banner(["👋 Bot arrêté proprement — à bientôt !"], logger.colors.yellow);
     process.exit(0);
@@ -1013,6 +1016,8 @@ async function main() {
   // un même code republié plus tard sera de nouveau réclamé
   history.cleanOldCodes();
   activity.load();
+  square.load();
+  square.start({ publish: publisher.publishSquare });
   antiban.setHooks({ onChange: onAntibanChange });
   const saved = antiban.init();
   if (saved.pauseUntil > Date.now()) {
@@ -1041,12 +1046,16 @@ async function main() {
   }
   logger.info(`🎯 ${targetChannels.length} canal(aux) demandé(s) dans TARGET_CHANNELS`);
   logger.info(`🐦 X : ${xsource.describe()}`);
+  logger.info(`🧧 Binance Square : ${square.describe()}`);
 
   // 5. Client Telegram — le relais démarre dès l'authentification, avant la
   //    résolution des canaux ; chaque code détecté est envoyé à Playwright
   logger.blank();
   logger.rule("📡 Telegram");
-  const { tg } = await startTelegramClient(targetChannels, handleDetectedCode, {
+  const { tg } = await startTelegramClient([...targetChannels, ...square.CHANNELS], handleDetectedCode, {
+    squareChannels: square.CHANNELS,
+    onSquarePost: (sources, meta) => square.handle(sources, meta),
+    onSquareCatchUp: () => square.announce(),
     onSelfMessage: (msg, isEdit) => {
       if (!isEdit && antiban.isResumeCommand(msg)) {
         onResumeCommand();

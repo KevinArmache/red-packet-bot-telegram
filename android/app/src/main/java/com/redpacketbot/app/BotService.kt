@@ -65,6 +65,7 @@ class BotService : Service() {
         const val ACTION_TEST_ALERT = "com.redpacketbot.app.TEST_ALERT"
         const val ACTION_SETUP_CHANNEL = "com.redpacketbot.app.SETUP_CHANNEL"
         const val ACTION_CHECK_CHANNEL = "com.redpacketbot.app.CHECK_CHANNEL"
+        const val ACTION_SQUARE_MARK = "com.redpacketbot.app.SQUARE_MARK"
         const val EXTRA_TITLE = "title"
         const val EXTRA_USERNAME = "username"
         const val EXTRA_PROMPT_ID = "promptId"
@@ -291,6 +292,8 @@ class BotService : Service() {
                 resumeOrStop()
             }
             ACTION_CHECK_CHANNEL -> if (nodeRunning) bridge?.event("publish_check") else resumeOrStop()
+            // 🧧 « Pris », « Raté »… : le bot relit les marques, et publie tes gains
+            ACTION_SQUARE_MARK -> if (nodeRunning) bridge?.event("square.mark") else resumeOrStop()
         }
         return START_STICKY
     }
@@ -565,6 +568,14 @@ class BotService : Service() {
                         .put("text", data.optString("text"))
                         .put("at", System.currentTimeMillis()),
                 )
+            }
+            "square_update" -> {
+                val count = data.optInt("count")
+                if (count > 0) {
+                    Notifications.square(this, count, data.optString("text"))
+                } else {
+                    Notifications.cancel(this, Notifications.ID_SQUARE)
+                }
             }
         }
     }

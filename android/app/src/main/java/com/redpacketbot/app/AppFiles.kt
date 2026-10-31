@@ -30,6 +30,10 @@ class AppFiles(context: Context) {
     val heartbeat = File(botData, ".run/heartbeat")
     /** Derniers codes, gains, graphique 24 h, stats par source (src/activity.js). */
     val activity = File(botData, ".run/activity.json")
+    /** 🧧 Red Packets de Binance Square repérés sur Telegram (src/square.js). */
+    val square = File(botData, ".run/square.json")
+    /** 🧧 Ce que tu en as fait (« Pris », « Raté »…) : écrit par l'app, lu par le bot. */
+    val squareMarks = File(botData, ".run/square-marks.json")
     val nodeExit = File(botData, ".run/node-exit.json")
     val logFile = File(botData, "logs/bot.log")
     val telegramSession = File(botData, "telegram-session.txt")

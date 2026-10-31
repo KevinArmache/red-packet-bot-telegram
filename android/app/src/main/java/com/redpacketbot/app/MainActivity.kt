@@ -30,6 +30,7 @@ class MainActivity : ComponentActivity() {
         const val SCREEN_LOGS = "logs"
         const val SCREEN_SOURCES = "sources"
         const val SCREEN_X = "x"
+        const val SCREEN_SQUARE = "square"
     }
 
     private val vm: BotViewModel by viewModels()

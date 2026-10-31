@@ -190,6 +190,29 @@ fun SettingsScreen(vm: BotViewModel, importedEnv: MutableState<String?>, onNavig
                 }
             }
 
+            item { GroupLabel("Binance Square") }
+            item {
+                SectionCard(title = "🧧 Red Packets Binance Square", subtitle = "Liens et réponses repérés sur Telegram") {
+                    SwitchRow(
+                        "🧧",
+                        "Lire les liens Binance Square",
+                        "Le bot ne fait rien sur Binance : tu ouvres le post et tu réponds.",
+                        draft.squareEnabled,
+                    ) { draft = draft.copy(squareEnabled = it) }
+                    if (draft.squareEnabled) {
+                        SettingField(
+                            "Canaux de liens (un par ligne)",
+                            draft.squareChannels,
+                            { draft = draft.copy(squareChannels = it) },
+                            error = errorFor("squareChannels"),
+                            supporting = "Jamais lus comme des canaux de codes · le compte doit y être abonné",
+                            singleLine = false,
+                            minLines = 2,
+                        )
+                    }
+                }
+            }
+
             item { GroupLabel("Affichage") }
             item { CurrencyCard(vm) }
 

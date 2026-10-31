@@ -32,7 +32,9 @@ object Backup {
     private const val DAY_MS = 24 * 3600_000L
 
     /** Fichiers du bot (BOT_DATA_DIR) repris tels quels : jamais un autre chemin. */
-    private val BOT_FILES = listOf("history.json", ".run/antiban.json", ".run/activity.json", ".alert-chat-id")
+    private val BOT_FILES = listOf(
+        "history.json", ".run/antiban.json", ".run/activity.json", ".run/square.json", ".run/square-marks.json", ".alert-chat-id",
+    )
 
     // ─── Contenu ────────────────────────────────────────────────────────────
 

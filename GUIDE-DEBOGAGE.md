@@ -19,6 +19,7 @@ Ce guide sert quand l'app **Red Packet Bot** se comporte mal sur le téléphone.
    - [9 bis. Résolu : des codes valides comptés comme faux (fenêtre « Déconnecté » de Binance)](#9-bis-résolu--des-codes-valides-comptés-comme-faux-fenêtre--déconnecté--de-binance)
 10. [Si le bot s'endort de nouveau](#10-si-le-bot-sendort-de-nouveau)
 11. [X (Twitter) : lecture des notifications de l'appli X](#11-x-twitter--lecture-des-notifications-de-lappli-x)
+12. [Binance Square : liens, quiz et faux codes](#12-binance-square--liens-quiz-et-faux-codes)
 
 ---
 
@@ -802,3 +803,57 @@ Le format des notifications de X peut changer à chaque mise à jour de l'appli.
 - Les textes de `Status.describe()` (titres de la notification) sont repris dans GUIDE-ANDROID.md : ne les change pas sans mettre le guide à jour.
 - **Pas de `\p{…}` dans les expressions régulières du bot.** Le Node.js mobile du téléphone (18.20.4) n'a pas les tables Unicode : il refuse `\p{Extended_Pictographic}` (« Invalid property name ») et le bot ne démarre plus, alors que le Node.js du PC l'accepte. C'est arrivé le 24/10/2026 : le bot est resté arrêté 18 min après une mise à jour (`💀 Démarrage du bot impossible : SyntaxError` dans `logcat -s RedPacketBot-node`). Écris les plages de caractères à la main (`EMOJI` dans `src/telegram.js`). `npm run test:guard` le vérifie.
 - **Après chaque installation, vérifie que le bot a démarré** : `adb shell dumpsys activity service com.redpacketbot.app/.BotService` doit répondre (`No services match` = bot arrêté), puis `adb shell "logcat -d -s RedPacketBot-node:*"` pour la cause.
+
+---
+
+## 12. Binance Square : liens, quiz et faux codes
+
+### Résolu : les liens Square auraient vidé le compteur anti-blocage
+
+**Symptôme évité.** Le 31/10/2026, avant d'ajouter @Packet_Red : sur 8 messages réels, 7 donnaient au bot un faux code à taper.
+
+**Cause.**
+
+- Le lien porte le parrainage de celui qui l'a partagé : `…/uni-qr/cpos/383…?r=K1H0AFHZ&l=en&uco=…`. `K1H0AFHZ` a la forme d'un code, et `extractCodes` lit aussi les liens.
+- La réponse au quiz est en monospace, la convention pour publier un code : `HAPPY BIRTHDAY` donnait `BIRTHDAY`, en source « monospace », donc « clair » : il passait même en mode « codes clairs ».
+
+@BoxxSquare était déjà dans les listes du PC et du téléphone. Le téléphone n'en a tiré aucun code du 28 au 31/10 : son compte n'y était sans doute pas abonné. Le piège se serait déclenché à l'abonnement.
+
+**Correctif** (`src/telegram.js`, `buildMessageSources`) :
+
+- paramètres `r`, `ref`, `referral`, `inviteCode`, `uco` retirés de tous les messages Telegram ;
+- `square: true` si le message contient un lien Square : `extractCodes` n'y garde alors que les sources `lien` et `label`.
+
+Le filtre est dans `buildMessageSources` et pas dans `extractCodes` pour une raison : les posts X n'y passent pas, leur détection ne change pas (Kevin l'a demandé).
+
+**Vérification.** `npm run test:guard`, partie « Liens Binance Square » : messages réels, lien visible ou masqué. Sur le téléphone, après 21 liens lus :
+
+```bash
+adb shell dumpsys activity service com.redpacketbot.app/.BotService logs 700 | grep -E "Red Packet Square|Code trouvé"
+```
+
+Aucune ligne `Code trouvé` ne doit venir de ces canaux.
+
+### Fonctionnement
+
+- `src/square.js` lit les messages, fusionne par numéro de post, écrit `.run/square.json`.
+- L'app écrit `.run/square-marks.json` (« Pris », « Raté »…), le bot le relit à chaque marque (`square.mark`) et au démarrage, et publie les gains.
+- Le statut réel n'est pas lu sur Binance : 24 h sans marque, et la carte passe dans « Terminés » (`TAKE_WINDOW_MS`, dans `square.js` et `SquareLog.kt`).
+
+### Ce qu'on sait du Red Packet Quiz
+
+Relevé le 31/10/2026. **Le bot ne se sert de rien de tout ça** : il ne lit pas Binance.
+
+- `cpos` : post court, `cart` : article.
+- Sur 13 posts, un seul n'avait pas de question : `CLAIM BOX` chez @Packet_Red veut dire « pas de question ».
+- Dans le code public du site, le post contient un bloc `redEnvelop` : `type` (1 : quiz, 2 : sans question), `quiz` (la question), `answerHint` (l'indice, presque toujours la réponse), `currency`, `expiredTime`, `isRunOut`, `isExpired`, `isReceivedByCurrentUser`.
+- La réponse passe par la zone de commentaires, puis une fenêtre « Bonne réponse » propose de réclamer.
+- La réclamation peut exiger un captcha (`needCaptchaVerification`).
+- Dans le code lu, le follow n'est consulté qu'après la réclamation, pour la fenêtre de succès. Sur les 13 posts, aucun champ ne l'impose : il apparaît seulement dans le texte d'une question. À confirmer sur un vrai cas.
+- Le mot « Expired » d'une page publique est un libellé caché par le style : ne pas le lire comme un statut.
+
+### Pièges
+
+- **Binance bloque les lectures automatiques.** `curl` reçoit un statut 202 vide et un navigateur anonyme une erreur 403 de CloudFront. Le Chromium du PC, ouvert par un script le 31/10, a affiché un contrôle anti-robot. Ne cherche pas à passer ces contrôles.
+- **Pilotage du navigateur du téléphone depuis le PC** (`adb forward` vers `webview_devtools_remote_*`) : refusé par les autorisations de Claude Code le 31/10 (« Website Access Circumvention »). Lire le statut des Red Packets ou le fil Following suppose une décision de Kevin : à ne pas contourner.
+- Une réponse peut être en plusieurs langues ou contenir des émojis : `parseAnswer` garde le texte exact du monospace.

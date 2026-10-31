@@ -76,6 +76,10 @@ const DIALOG_SCAN_LIMIT = 3000; // Dialogues parcourus pour l'index groupé
 const LINKED_LOOKUP_DELAY_MS = 250; // Espacement des getFullChat en arrière-plan
 const RESOLVE_LINKED_CHATS = process.env.RESOLVE_LINKED_CHATS !== "false";
 
+// Canaux de liens Binance Square : messages relus au démarrage
+const SQUARE_CATCHUP_MESSAGES = 20;
+const SQUARE_CATCHUP_MAX_AGE_MS = 24 * 3600_000;
+
 /** Normalise les IDs Telegram (number / bigint / string) pour comparaison fiable. */
 function normalizeChatId(id) {
   return String(id);
@@ -673,11 +677,26 @@ async function loginTelegram() {
  * @param {(tg: TelegramClient, me: import('@mtcute/node').User) => Promise<void>} [options.onAuthenticated]
  *   Appelé juste après la connexion, AVANT la résolution des canaux (qui peut
  *   durer) : le relais démarre ainsi au plus tôt.
+ * @param {string[]} [options.squareChannels]
+ *   Canaux de liens Binance Square : jamais une source de codes.
+ * @param {(sources: object, meta: { channel: string, postedAt: number, quiet?: boolean }) => void} [options.onSquarePost]
+ *   Message avec un lien Binance Square (onglet 🧧 Square de l'app).
+ * @param {() => void} [options.onSquareCatchUp]
+ *   Fin de la lecture des derniers messages des canaux de liens.
  * @returns {Promise<{ tg: TelegramClient, me: import('@mtcute/node').User }>}
  */
 async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
-  const { onSelfMessage, onConnectionState, onAuthenticated, onChannelMessage } = options;
+  const {
+    onSelfMessage,
+    onConnectionState,
+    onAuthenticated,
+    onChannelMessage,
+    onSquarePost,
+    onSquareCatchUp,
+    squareChannels = [],
+  } = options;
   const tg = createClient({ ownSignals: true });
+  const squareOnly = new Set(squareChannels.map((channel) => normalizeTarget(channel).toLowerCase()));
 
   const dp = new Dispatcher(tg);
 
@@ -801,12 +820,19 @@ async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
         );
       }
 
-      // ── ⛔ Aucun code publié avant le démarrage du script ───────────────
       // Pour une édition, c'est la date d'édition qui compte : un canal qui
       // ajoute le code MAINTENANT dans un vieux message reste un code neuf.
       const stamp = isEdit ? (msg.editDate ?? msg.date) : msg.date;
       const stampMs = stamp ? stamp.getTime() : Date.now();
 
+      // ── Lien Binance Square ─────────────────────────────────────────────
+      // Avant les contrôles de fraîcheur : ces Red Packets durent des jours,
+      // et rien n'est tapé sur Binance
+      const sources = buildMessageSources(msg);
+      if (sources.square) onSquarePost?.(sources, { channel: channelName, postedAt: stampMs });
+      if (squareOnly.has(chatKey) || (username && squareOnly.has(username))) return;
+
+      // ── ⛔ Aucun code publié avant le démarrage du script ───────────────
       if (stampMs < listeningSince) {
         stats.bump("messagesBacklog");
         backlogStreak++;
@@ -850,7 +876,6 @@ async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
       }
 
       // ── Extraction des codes ───────────────────────────────────────────
-      const sources = buildMessageSources(msg);
       const codes = extractCodes(sources);
       if (codes.length === 0) return;
 
@@ -1097,6 +1122,33 @@ async function startTelegramClient(targetChannels, onCodeFound, options = {}) {
           `🔗 ${added} groupe(s) de discussion lié(s) ajouté(s) — ${resolvedIds.size} chats surveillés au total`,
         );
       }
+    })();
+  }
+
+  // ── Étape 4 (arrière-plan) — derniers messages des canaux de liens ───────
+  // Ces Red Packets durent des jours et rien n'est tapé sur Binance : reprendre
+  // ce qui a été publié bot arrêté est sans risque. La règle « aucun
+  // rattrapage » ne concerne que les codes.
+  if (onSquarePost && squareChannels.length > 0) {
+    void (async () => {
+      for (const target of squareChannels.map(normalizeTarget)) {
+        try {
+          const history = await withFloodRetry(
+            () => tg.getHistory(/^-?\d+$/.test(target) ? Number(target) : target, { limit: SQUARE_CATCHUP_MESSAGES }),
+            target,
+          );
+          for (const msg of [...history].reverse()) {
+            const postedAt = msg.date.getTime();
+            if (Date.now() - postedAt > SQUARE_CATCHUP_MAX_AGE_MS) continue;
+            const sources = buildMessageSources(msg);
+            const channel = channelMap.get(normalizeChatId(msg.chat.id)) ?? `@${target}`;
+            if (sources.square) onSquarePost(sources, { channel, postedAt, quiet: true });
+          }
+        } catch (err) {
+          logger.warn(`🧧 Derniers messages de ${target} illisibles — ${explainResolveError(err)}`);
+        }
+      }
+      onSquareCatchUp?.();
     })();
   }
 

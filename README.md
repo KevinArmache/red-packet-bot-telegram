@@ -19,6 +19,7 @@
 - [🤝 Relais PC ⇄ téléphone](#-relais-pc--téléphone)
 - [🔔 Alertes Telegram](#-alertes-telegram)
 - [📣 Publier tes gains sur ton canal](#-publier-tes-gains-sur-ton-canal)
+- [🧧 Red Packets de Binance Square](#-red-packets-de-binance-square)
 - [🧳 Téléphone perdu : la sauvegarde](GUIDE-ANDROID.md#10-bis--téléphone-perdu-ou-volé--tout-récupérer)
 - [🔧 Configuration (.env)](#-configuration-env)
 - [📊 Logs et bilan](#-logs-et-bilan)
@@ -41,6 +42,7 @@
 - **🛡️ Protections anti-ban** — une seule soumission par code, un code à la fois, anti-doublons 48 h, **anti-blocage** (le bot compte les codes faux d'affilée et ne tape jamais le 10e, qui bloquerait les Red Packets 5 h), pause seulement sur un vrai blocage Binance, navigateur furtif, session Binance expirée détectée sans jamais taper un code au mauvais endroit.
 - **🔔 Alertes qui sonnent vraiment** — via ton propre bot Telegram (@BotFather) : gains, reconnexions à faire, pauses, plantages, bilan quotidien.
 - **📣 Tes gains publiés sur ton canal** — chaque Red Packet gagné part tout seul sur ton canal Telegram, code copiable et montant compris, pour que tes abonnés le tentent aussi.
+- **🧧 Red Packets de Binance Square** — les liens et les réponses publiés sur Telegram (@Packet_Red…) sont rangés dans un onglet à part, avec statuts et filtres. Le bot n'agit pas sur Binance : tu touches « Ouvrir », la réponse est copiée, tu la colles et tu valides. Ceux que tu as pris partent sur ton canal.
 - **🐦 Codes publiés sur X (Twitter)** — le téléphone lit les notifications de l'appli X (comptes suivis avec la cloche) : ni scraping, ni API, rien que X puisse bloquer. Mêmes règles et même anti-blocage que Telegram ; quand le PC réclame, le téléphone lui transmet les codes (`#xcode`).
 - **🤝 Relais PC ⇄ téléphone** — le PC a la priorité, le téléphone prend le relais dès que le PC s'arrête. Un seul appareil réclame à la fois, pour ne pas soumettre deux fois le même code.
 - **📱 App Android 24/7** — une APK fabriquée en une commande (`npm run apk`), thème sombre « rouge & or » (clair si le téléphone est en mode clair), assistant de démarrage, réglages et connexions dans l'app (Binance en plein écran), tableau de bord (gains, graphique 24 h, jauge anti-blocage, relais, stats par canal), service permanent, relance automatique (plantage, redémarrage du téléphone, mise à jour).
@@ -378,6 +380,37 @@ Telegram classe aussi les canaux par nombre d'abonnés : les premiers partages c
 
 ---
 
+## 🧧 Red Packets de Binance Square
+
+Certains Red Packets n'ont pas de code : ils sont attachés à un post ou à un article de Binance Square. C'est le **Red Packet Quiz** (ancien « Crypto Box » de Square) : il faut ouvrir le post et répondre à sa question. Des canaux comme [@Packet_Red](https://t.me/Packet_Red) publient le lien et la réponse.
+
+| | Code | Binance Square |
+|---|---|---|
+| Où | Page Cryptobox | Sous un post ou un article |
+| Ce qu'il faut | Un code de 8 caractères | Une réponse, ou rien pour un Red Packet direct |
+| Lien | Aucun, ou lien Cryptobox | `uni-qr/cpos/…` (post), `uni-qr/cart/…` (article) |
+| Durée de vie | Quelques minutes | De 1 à 7 jours d'après les posts relevés, sauf épuisement avant |
+| Qui agit | Le bot | Toi |
+
+**Le bot n'agit pas sur Binance Square.** Les règles de Square interdisent les bots (« Using bots… to generate interactions ») et la réponse passe par la zone de commentaires. Il fait tout le reste :
+
+1. il lit les liens et les réponses sur Telegram ;
+2. il réunit par numéro de post ce que disent les canaux : deux canaux, une seule carte, réponse « confirmée » ;
+3. il range le tout dans l'onglet **🧧 Square** de l'app, avec une seule notification ;
+4. tu touches **🚀 Ouvrir et copier** : Binance s'ouvre sur le post, la réponse est dans le presse-papiers ;
+5. au retour, tu touches **🏆 Pris** : le lien et la réponse partent sur ton canal.
+
+**Jamais de faux codes.** Le parrainage d'un lien (`r=K1H0AFHZ`) et la réponse en monospace ressemblent à des codes : ils auraient fait monter le compteur anti-blocage. Un message avec un lien Square ne garde que les codes explicites (lien Cryptobox, « Code : »), et les canaux de `SQUARE_CHANNELS` ne sont jamais lus comme des canaux de codes.
+
+**Limites, en toute honnêteté :**
+
+- Le statut réel d'un Red Packet n'est pas lu sur Binance : au bout de 24 h sans marque de ta part, il passe dans « Terminés ». Il peut être épuisé bien avant.
+- La crypto n'apparaît que si le canal la donne : @Packet_Red écrit souvent `CLAIM ~` sans la nommer.
+- Les comptes que tu suis sur Binance Square ne sont pas surveillés.
+- Les gains sont modestes : de 0,001 à 0,0025 USDT par post sur 4 montants relevés.
+
+---
+
 ## 🔧 Configuration (.env)
 
 Le modèle commenté est [`.env.example`](.env.example). **L'app Android importe ce même `.env`** : elle règle elle-même ce qui change sur le téléphone (voir la fin de cette section).
@@ -429,6 +462,13 @@ Voir le [guide Android](GUIDE-ANDROID.md#7-bis-les-codes-publiés-sur-x-twitter)
 - **`X_ACCOUNTS`** — vide par défaut = tous les comptes suivis avec la cloche, suggestions de X comprises. Comptes séparés par des virgules, avec ou sans `@` (par exemple `@binance,@binance_fr`). Une liste est conseillée.
 - **`X_DRY_RUN`** — défaut `false`. Essai à blanc : détection, relais et anti-blocage tournent, mais aucun code n'est tapé sur Binance (« 🧪 Essai à blanc » dans les logs). Les notifications de test envoyées par adb ne sont lues que dans ce mode. Le PC suit l'essai à blanc annoncé dans chaque `#xcode`.
 - **`X_RELAY_ACCEPT`** — défaut `true`. PC : réclamer les codes X relayés par le téléphone (`#xcode`).
+
+### Binance Square
+
+Voir [🧧 Red Packets de Binance Square](#-red-packets-de-binance-square). Sur le téléphone : **Réglages → 🧧 Red Packets Binance Square**.
+
+- **`SQUARE_ENABLED`** — défaut `true`. Lire les liens Binance Square.
+- **`SQUARE_CHANNELS`** — vide par défaut sur le PC, `@Packet_Red` dans l'app. Canaux de liens, séparés par des virgules : jamais lus comme des canaux de codes, et leurs 20 derniers messages sont relus au démarrage. Le compte doit y être abonné pour recevoir les nouveaux messages.
 
 ### Navigateur et Binance
 
@@ -702,6 +742,7 @@ red-packet-bot-telegram/
 │   ├── binance.js         # Automatisation Binance (Playwright)
 │   ├── relay.js           # Relais PC ⇄ téléphone (message #botrelay)
 │   ├── xsource.js         # Codes publiés sur X (notifications de l'appli X, relais #xcode)
+│   ├── square.js          # Liens Binance Square repérés sur Telegram (onglet 🧧 de l'app)
 │   ├── activity.js        # Journal d'activité de l'app (derniers codes, gains, stats par source)
 │   ├── prices.js          # Valeur en dollars des gains (prix public Binance, sans clé)
 │   ├── notifier.js        # Alertes via ton bot @BotFather

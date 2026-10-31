@@ -36,6 +36,7 @@ object Routes {
     const val HOME = "home"
     const val ACTIVITY = "activity"
     const val ACTIVITY_LOGS = "activity/logs"
+    const val SQUARE = "square"
     const val SOURCES = "sources"
     const val SOURCES_TELEGRAM = "sources/telegram"
     const val SOURCES_X = "sources/x"
@@ -55,6 +56,7 @@ object Routes {
         "health" -> HEALTH
         "logs" -> ACTIVITY_LOGS
         "activity" -> ACTIVITY
+        "square" -> SQUARE
         "wizard" -> WIZARD
         else -> null
     }
@@ -68,6 +70,7 @@ private data class Tab(val route: String, val emoji: String, val label: String)
 private val TABS = listOf(
     Tab(Routes.HOME, "🏠", "Accueil"),
     Tab(Routes.ACTIVITY, "📜", "Activité"),
+    Tab(Routes.SQUARE, "🧧", "Square"),
     Tab(Routes.SOURCES, "📡", "Sources"),
     Tab(Routes.SETTINGS, "⚙️", "Réglages"),
 )
@@ -131,6 +134,7 @@ fun AppRoot(vm: BotViewModel, pendingRoute: MutableState<String?>, importedEnv: 
                     Crossfade(targetState = route, label = "screen") { current ->
                         when (Routes.tabOf(current)) {
                             Routes.ACTIVITY -> ActivityScreen(vm, startOnLogs = current == Routes.ACTIVITY_LOGS)
+                            Routes.SQUARE -> SquareScreen(vm)
                             Routes.SOURCES -> SourcesScreen(
                                 vm,
                                 focus = current.substringAfter('/', ""),

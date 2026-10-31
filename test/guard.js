@@ -489,6 +489,104 @@ async function main() {
     check("post X avec lien Square : détection inchangée", x.extractFromPost(post), [{ code: "AB12CD34", source: "texte" }]);
   }
 
+  section("Binance Square : ce que disent les canaux de liens");
+  {
+    const square = require("../src/square");
+    const { buildMessageSources } = require("../src/telegram");
+    const sources = (text, monospace = [], links = []) =>
+      buildMessageSources({
+        text,
+        entities: [
+          ...monospace.map((value) => ({ kind: "code", text: value })),
+          ...links.map((url) => ({ params: { kind: "text_link", url } })),
+        ],
+      });
+    const SHARE = "?r=UZJQUBIZ&l=en&uco=nznHbWNWgMzj4lsWdS7CWg&uc=app_square_share_link&us=copylink";
+    const ID = "383084365843426";
+    const CLEAN = `https://app.binance.com/uni-qr/cpos/${ID}?uc=app_square_share_link&us=copylink`;
+    const packetRed = (coin, prize, answer) =>
+      `🎁 ${coin} 🎁\n🎰 ${prize} | Random 🎲\n🎯Answer » ${answer}\n💎Ans » ✨${answer}✨\n🧧@Packet_Red #Square #Crypto`;
+
+    check(
+      "liens : partage, article, site, doublon",
+      square.parseLinks(
+        `https://app.binance.com/uni-qr/cpos/${ID}${SHARE}\n` +
+          `https://app.binance.com/uni-qr/cart/383187948524759?uc=x\n` +
+          `https://www.binance.com/fr/square/post/${ID}\n` +
+          "https://www.binance.com/ar/square/post/06-04-2025-binance-issues-warning-25156807837810",
+      ),
+      [
+        { id: ID, segment: "cpos" },
+        { id: "383187948524759", segment: "cart" },
+        { id: "25156807837810", segment: "cpos" },
+      ],
+    );
+    check("lien sans parrainage", square.cleanLink({ id: ID, segment: "cpos" }), CLEAN);
+
+    check(
+      "@Packet_Red : crypto, montant, réponse",
+      square.parseMessage(sources(packetRed("USDT", "USDT ~ 0.00098655", "HAPPY BIRTHDAY"), ["HAPPY BIRTHDAY"], [`https://app.binance.com/uni-qr/cpos/${ID}${SHARE}`])),
+      [{ id: ID, segment: "cpos", coin: "USDT", amount: "0.00098655", split: "random", type: "quiz", answer: "HAPPY BIRTHDAY" }],
+    );
+    const direct = square.parseMessage(sources(packetRed("PEPE", "PEPE ~ 891.19", "CLAIM BOX"), ["CLAIM BOX"], [`https://app.binance.com/uni-qr/cart/383187948524759${SHARE}`]))[0];
+    check("« CLAIM BOX » : réclamation directe, sans question", [direct.type, direct.answer, direct.segment], ["direct", "", "cart"]);
+    check(
+      "lot « CLAIM ~ » : pas une crypto",
+      square.parseMessage(sources(packetRed("CLAIM", "CLAIM ~", "BONK"), ["BONK"], [`https://app.binance.com/uni-qr/cpos/${ID}`])).map((m) => [m.coin, m.answer]),
+      [["", "BONK"]],
+    );
+    check(
+      "réponse en chinois",
+      square.parseMessage(sources(packetRed("BTTC", "BTTC ~ 19283.21", "周末愉快"), ["周末愉快"], [`https://app.binance.com/uni-qr/cpos/${ID}`]))[0].answer,
+      "周末愉快",
+    );
+    check(
+      "ligne « Answer » sans monospace, décoration retirée",
+      square.parseAnswer({ plain: "💎Ans » ✨SOL✨\nhttps://app.binance.com/uni-qr/cpos/1", trusted: [] }),
+      "SOL",
+    );
+    const boxx = square.parseMessage(sources("💓 BTC 💓\nHAPPY BIRTHDAY! ❤️🎉", ["HAPPY BIRTHDAY! ❤️🎉"], [`https://app.binance.com/uni-qr/cpos/${ID}${SHARE}`]))[0];
+    check("@BoxxSquare : titre et monospace, texte exact", [boxx.coin, boxx.answer, boxx.type], ["BTC", "HAPPY BIRTHDAY! ❤️🎉", "quiz"]);
+    check("message sans lien Square : rien", square.parseMessage(sources("Answer » SOL")), []);
+    check(
+      "lien sans réponse : type inconnu",
+      square.parseMessage(sources(`https://app.binance.com/uni-qr/cpos/${ID}`)).map((m) => [m.type, m.answer]),
+      [["", ""]],
+    );
+
+    // Même post vu par plusieurs canaux : une seule carte
+    const NOW = 1_800_000_000_000;
+    const see = (item, answer, channel, at = NOW) =>
+      square.mergeSighting(item, { id: ID, segment: "cpos", coin: "USDT", amount: "", split: "", type: answer ? "quiz" : "direct", answer }, channel, at);
+    const once = see(undefined, "SOL", "@Packet_Red");
+    const twice = see(once, "sol", "@BoxxSquare", NOW + 1000);
+    check("même réponse (casse ignorée) : confirmée par 2 canaux", [twice.answers.length, twice.answers[0].from], [1, ["@Packet_Red", "@BoxxSquare"]]);
+    check("2 canaux, 1 carte : première vue gardée", [twice.firstAt, twice.lastAt, twice.sources.length], [NOW, NOW + 1000, 2]);
+    const third = see(see(see(undefined, "BNB", "@a"), "SOL", "@b"), "SOL", "@c");
+    check("réponses différentes : la plus citée d'abord", third.answers.map((a) => a.text), ["SOL", "BNB"]);
+    check("« CLAIM BOX » puis vraie réponse : quiz", see(see(undefined, "", "@a"), "SOL", "@b").type, "quiz");
+    check("même canal deux fois : compté une fois", see(see(undefined, "SOL", "@a"), "SOL", "@a").answers[0].from, ["@a"]);
+
+    const HOUR_MS = 3_600_000;
+    const items = [
+      { id: "1", firstAt: NOW - HOUR_MS, publishedAt: 0 },
+      { id: "2", firstAt: NOW - 25 * HOUR_MS, publishedAt: 0 },
+      { id: "3", firstAt: NOW - HOUR_MS, publishedAt: 0 },
+      { id: "4", firstAt: NOW - HOUR_MS, publishedAt: NOW - 1 },
+    ];
+    const marks = { 3: { mark: "won", at: NOW - HOUR_MS }, 4: { mark: "won", at: NOW - HOUR_MS } };
+    check("à prendre : récent et sans marque", square.takeList(items, marks, NOW).map((i) => i.id), ["1"]);
+    check("à publier : pris, pas encore publié", square.winsToPublish(items, marks, NOW).map((i) => i.id), ["3"]);
+    check(
+      "marque de plus de 24 h : pas publiée",
+      square.winsToPublish(items, { 1: { mark: "won", at: NOW - 25 * HOUR_MS } }, NOW),
+      [],
+    );
+    check("« Raté » : jamais publié", square.winsToPublish(items, { 1: { mark: "missed", at: NOW } }, NOW), []);
+    check("résumé d'un quiz", square.describeItem({ coin: "USDT", type: "quiz", answers: [{ text: "SOL", from: [] }] }), "USDT · réponse : SOL");
+    check("résumé sans question", square.describeItem({ coin: "PEPE", type: "direct", answers: [] }), "PEPE · sans question");
+  }
+
   // ─── X (Twitter) : posts lus dans les notifications, relais #xcode ────────
   section("X (Twitter) : posts et relais #xcode");
   {
@@ -816,6 +914,40 @@ async function main() {
       check("canal et format", [tg.calls[0]?.body.chat_id, tg.calls[0]?.body.parse_mode], ["@MonCanal", "HTML"]);
       check("rafale : aucune alerte", alerts.length, 0);
       check("bilan", publisher.statsRows(), [["📣 Gains publiés", "3"]]);
+    }
+
+    // Red Packet de Binance Square pris à la main : un post à lui
+    {
+      const { formatSquarePost } = require("../src/publisher");
+      const link = "https://app.binance.com/uni-qr/cpos/383107779195016?uc=app_square_share_link&us=copylink";
+      const href = link.replace("&", "&amp;");
+      check(
+        "post Square : réponse copiable et lien",
+        formatSquarePost({ type: "quiz", coin: "SOL", answer: "a<b", link }),
+        `🧧 Red Packet Quiz réclamé !\n\n🎯 Réponse : <code>a&lt;b</code>\n💰 Crypto : SOL\n👉 <a href="${href}">Ouvrir le post sur Binance Square</a>`,
+      );
+      check(
+        "post Square sans question ni crypto",
+        formatSquarePost({ type: "direct", answer: "", link }),
+        `🧧 Red Packet Binance Square réclamé !\n\n👉 <a href="${href}">Ouvrir le post sur Binance Square</a>`,
+      );
+
+      const tg = fakeTelegram();
+      const { publisher } = make(tg);
+      publisher.publish({ code: "AAAA1111", gain: "1 USDT", gainUsd: 1 });
+      const sent = publisher.publishSquare({ id: "383107779195016", type: "quiz", coin: "SOL", answer: "SOL", link });
+      publisher.publish({ code: "BBBB2222", gain: "2 USDT", gainUsd: 2 });
+      await publisher.flush();
+      check("post Square accepté", sent, true);
+      check("post Square : à part, entre deux gains", tg.calls.length, 3);
+      check(
+        "post Square : jamais mélangé aux codes",
+        [tg.calls[1]?.body.text.includes("Red Packet Quiz"), tg.calls[1]?.body.text.includes("BBBB2222")],
+        [true, false],
+      );
+      check("post Square : aucun parrainage", /[?&]r=/.test(tg.calls[1]?.body.text ?? ""), false);
+      check("statistiques : 3 gains publiés", publisher.statsRows(), [["📣 Gains publiés", "3"]]);
+      check("sans canal : rien à publier", createPublisher({ token: "", channel: "" }).publishSquare({ id: "1", link }), false);
     }
 
     {

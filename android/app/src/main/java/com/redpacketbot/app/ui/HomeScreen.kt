@@ -26,6 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redpacketbot.app.AppVersion
 import com.redpacketbot.app.BotState
 import com.redpacketbot.app.BotStatus
+import com.redpacketbot.app.SquareLog
 import com.redpacketbot.app.Status
 import com.redpacketbot.app.Tone
 import com.redpacketbot.app.ui.components.AntibanGauge
@@ -148,6 +149,16 @@ fun HomeScreen(vm: BotViewModel, onNavigate: (String) -> Unit) {
             item {
                 Banner("🧭", "Mise en route : $remaining étape(s) à terminer.", AppColors.gold) {
                     TextButton(onClick = { onNavigate(Routes.WIZARD) }) { Text("Continuer") }
+                }
+            }
+        }
+
+        // ── 🧧 Binance Square ──────────────────────────────────────────────
+        val toTake = snapshot.square.inList(SquareLog.TAKE, now).size
+        if (toTake > 0) {
+            item {
+                Banner("🧧", if (toTake == 1) "1 Red Packet à prendre" else "$toTake Red Packets à prendre", AppColors.gold) {
+                    TextButton(onClick = { onNavigate(Routes.SQUARE) }) { Text("Voir") }
                 }
             }
         }

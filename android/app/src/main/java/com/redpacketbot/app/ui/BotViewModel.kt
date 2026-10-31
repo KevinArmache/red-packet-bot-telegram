@@ -14,6 +14,7 @@ import com.redpacketbot.app.BotService
 import com.redpacketbot.app.BotState
 import com.redpacketbot.app.Health
 import com.redpacketbot.app.Heartbeat
+import com.redpacketbot.app.SquareLog
 import com.redpacketbot.app.XListenerState
 import com.redpacketbot.app.XNotificationListener
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +45,8 @@ data class Snapshot(
     val xAccess: Boolean,
     /** 🧳 Dernier envoi de la sauvegarde par ton bot (Backup.state). */
     val backup: JSONObject = JSONObject(),
+    /** 🧧 Red Packets de Binance Square repérés sur Telegram. */
+    val square: SquareLog = SquareLog(),
 ) {
     val status: String get() = state.optString("status", BotState.STOPPED)
 
@@ -90,6 +93,7 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
     private val healthPrefs = app.getSharedPreferences("health", Context.MODE_PRIVATE)
     private val uiPrefs = app.getSharedPreferences("ui", Context.MODE_PRIVATE)
     @Volatile private var lastActivity: ActivityLog? = null
+    @Volatile private var lastSquare: SquareLog? = null
 
     val snapshot: StateFlow<Snapshot> = flow {
         while (true) {
@@ -123,6 +127,7 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
             xListener = XListenerState.read(files.xListener),
             xAccess = XNotificationListener.isAccessGranted(getApplication()),
             backup = Backup.state(files),
+            square = SquareLog.read(files.square, files.squareMarks, lastSquare).also { lastSquare = it },
         )
     }
 
@@ -205,6 +210,39 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
         }
     } catch (_: Exception) {
         null
+    }
+
+    // ─── 🧧 Binance Square ─────────────────────────────────────────────────
+
+    private val _squareFilters = MutableStateFlow(
+        SquareFilters(
+            type = uiPrefs.getString("squareType", "").orEmpty(),
+            coin = uiPrefs.getString("squareCoin", "").orEmpty(),
+            source = uiPrefs.getString("squareSource", "").orEmpty(),
+            answerOnly = uiPrefs.getBoolean("squareAnswerOnly", false),
+            oldestFirst = uiPrefs.getBoolean("squareOldestFirst", false),
+        ),
+    )
+    val squareFilters: StateFlow<SquareFilters> = _squareFilters
+
+    /** Filtres de l'onglet 🧧 Square : gardés d'une ouverture à l'autre. */
+    fun setSquareFilters(filters: SquareFilters) {
+        uiPrefs.edit()
+            .putString("squareType", filters.type)
+            .putString("squareCoin", filters.coin)
+            .putString("squareSource", filters.source)
+            .putBoolean("squareAnswerOnly", filters.answerOnly)
+            .putBoolean("squareOldestFirst", filters.oldestFirst)
+            .apply()
+        _squareFilters.value = filters
+    }
+
+    /** Marque un Red Packet (« Pris », « Raté »…) ; le bot publie tes gains s'il tourne. */
+    fun markSquare(id: String, mark: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            SquareLog.writeMark(files.squareMarks, id, mark)
+            if (snapshot.value.isRunning) send(BotService.ACTION_SQUARE_MARK)
+        }
     }
 
     // ─── Assistant de démarrage ────────────────────────────────────────────

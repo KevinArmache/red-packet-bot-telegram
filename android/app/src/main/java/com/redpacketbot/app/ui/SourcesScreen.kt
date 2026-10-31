@@ -76,6 +76,7 @@ fun SourcesScreen(vm: BotViewModel, focus: String, onNavigate: (String) -> Unit)
         item { BinanceCard(snapshot) }
         item { ChannelsCard(snapshot, onEdit = { onNavigate(Routes.SETTINGS) }) }
         item { XCard(vm, snapshot, onEdit = { onNavigate(Routes.SETTINGS) }) }
+        item { SquareChannelsCard(snapshot, onEdit = { onNavigate(Routes.SETTINGS) }) }
         item {
             SectionCard(title = "💡 Bon à savoir") {
                 Hint("• Ne partage jamais le code Telegram : il donne accès à ton compte.")
@@ -248,6 +249,31 @@ private fun ChannelsCard(snapshot: Snapshot, onEdit: () -> Unit) {
                 Text(if (showAll) "Réduire" else "Voir les ${rows.size - MAX_CHANNELS_SHOWN} autres")
             }
         }
+    }
+}
+
+/** 🧧 Canaux de liens Binance Square : ils ne donnent jamais de code. */
+@Composable
+private fun SquareChannelsCard(snapshot: Snapshot, onEdit: () -> Unit) {
+    val now = System.currentTimeMillis()
+    val config = snapshot.config
+    val byKey = snapshot.activity.sources.filter { it.origin == "telegram" }.associateBy { sourceKey(it.name) }
+    SectionCard(
+        title = "🧧 Binance Square",
+        subtitle = "Canaux de liens : le bot n'y cherche jamais de code",
+        trailing = { TextButton(onClick = onEdit) { Text("✏️ Modifier") } },
+    ) {
+        if (!config.squareEnabled) {
+            Hint("Désactivé dans les Réglages.")
+            return@SectionCard
+        }
+        config.squareChannelList.forEachIndexed { index, channel ->
+            if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            val bare = BotConfig.bareChannel(channel)
+            SourceRow("🧧", if (bare.matches(Regex("-?\\d+"))) bare else "@$bare", byKey[bare.lowercase()], now)
+        }
+        Hint("Abonne le compte Telegram de ce téléphone à ces canaux, sinon Telegram ne lui envoie rien.")
+        Hint("Un lien Square publié dans tes canaux de codes arrive aussi dans l'onglet 🧧 Square.")
     }
 }
 

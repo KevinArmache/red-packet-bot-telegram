@@ -120,6 +120,21 @@ function formatPost(wins) {
 }
 
 /**
+ * Post d'un Red Packet de Binance Square pris à la main : le lien (sans
+ * parrainage) et la réponse, pour que tes abonnés le prennent aussi.
+ * @param {{ type?: string, coin?: string, answer?: string, link: string }} item
+ */
+function formatSquarePost(item) {
+  return [
+    item.type === "quiz" ? "🧧 Red Packet Quiz réclamé !" : "🧧 Red Packet Binance Square réclamé !",
+    "",
+    ...(item.answer ? [`🎯 Réponse : <code>${escapeHtml(item.answer)}</code>`] : []),
+    ...(item.coin ? [`💰 Crypto : ${escapeHtml(item.coin)}`] : []),
+    `👉 <a href="${escapeHtml(item.link)}">Ouvrir le post sur Binance Square</a>`,
+  ].join("\n");
+}
+
+/**
  * @pseudo à essayer pour un nouveau canal : celui demandé (nettoyé), puis
  * « _codes » et un nombre au hasard. Aucun pseudo demandé : canal privé.
  */
@@ -174,7 +189,7 @@ function createPublisher(options = {}) {
       .split(",")
       .some((target) => normalizeChannel(target)?.toLowerCase() === channel.toLowerCase());
 
-  /** @type {Array<{ code: string, ready: Promise<object> }>} */
+  /** @type {Array<{ code: string, ready: Promise<object> } | { square: object }>} */
   const pending = [];
   let running = false;
   let lastPostAt = 0;
@@ -237,33 +252,37 @@ function createPublisher(options = {}) {
     return { code: win.code, gain: win.gain, usd };
   }
 
-  /** Un post, avec ses nouveaux essais. true s'il est parti. */
-  async function post(wins) {
-    const codes = wins.map((w) => w.code).join(", ");
+  /**
+   * Un post, avec ses nouveaux essais. true s'il est parti.
+   * @param {string} text
+   * @param {string} label - ce qui est publié, pour les logs
+   * @param {number} count - gains contenus dans le post
+   */
+  async function post(text, label, count) {
     const payload = {
       chat_id: channel,
-      text: formatPost(wins),
+      text,
       parse_mode: "HTML",
       disable_web_page_preview: true,
     };
     for (let attempt = 0; ; attempt++) {
       const res = await api("sendMessage", payload);
       if (res.ok) {
-        counts.published += wins.length;
-        logger.info(`📣 Publié sur ${channel} : ${codes}`);
+        counts.published += count;
+        logger.info(`📣 Publié sur ${channel} : ${label}`);
         return true;
       }
       // Refus définitif (bot pas admin, canal introuvable, jeton faux) : inutile d'insister
       const permanent = res.status >= 400 && res.status < 500 && res.status !== 429;
       if (permanent || attempt >= RETRY_DELAYS_MS.length) {
-        counts.failed += wins.length;
-        reportFailure(`Gain non publié sur ${channel} (${codes})`, res.reason);
+        counts.failed += count;
+        reportFailure(`Gain non publié sur ${channel} (${label})`, res.reason);
         return false;
       }
       const waitMs = res.retryAfter
         ? (Math.min(res.retryAfter, MAX_RETRY_AFTER_S) + 1) * 1000
         : RETRY_DELAYS_MS[attempt];
-      logger.info(`📣 Publication de ${codes} : ${res.reason} — nouvel essai dans ${Math.round(waitMs / 1000)} s`);
+      logger.info(`📣 Publication de ${label} : ${res.reason} — nouvel essai dans ${Math.round(waitMs / 1000)} s`);
       await sleep(waitMs);
     }
   }
@@ -275,10 +294,17 @@ function createPublisher(options = {}) {
       while (pending.length > 0) {
         const wait = lastPostAt + GAP_MS - now();
         if (wait > 0) await sleep(wait);
-        // Les gains arrivés pendant l'attente partent ensemble
-        const batch = pending.splice(0, MAX_PER_POST);
-        const wins = await Promise.all(batch.map((item) => item.ready));
-        await post(wins);
+        if (pending[0].square) {
+          // Un Red Packet de Square a son post à lui
+          const { square } = pending.shift();
+          await post(formatSquarePost(square), `post Square ${square.id}`, 1);
+        } else {
+          // Les gains arrivés pendant l'attente partent ensemble
+          const next = pending.findIndex((item) => item.square);
+          const batch = pending.splice(0, Math.min(MAX_PER_POST, next < 0 ? pending.length : next));
+          const wins = await Promise.all(batch.map((item) => item.ready));
+          await post(formatPost(wins), wins.map((w) => w.code).join(", "), wins.length);
+        }
         lastPostAt = now();
       }
     } finally {
@@ -295,6 +321,18 @@ function createPublisher(options = {}) {
     if (!enabled || !win?.code) return;
     pending.push({ code: win.code, ready: resolveWin(win) });
     void pump();
+  }
+
+  /**
+   * Publie un Red Packet de Binance Square pris à la main. Ne bloque jamais.
+   * @param {{ id: string, type?: string, coin?: string, answer?: string, link: string }} item
+   * @returns {boolean} false si aucun canal n'est réglé.
+   */
+  function publishSquare(item) {
+    if (!enabled || !item?.id) return false;
+    pending.push({ square: item });
+    void pump();
+    return true;
   }
 
   /** Attend que les posts en attente soient partis (arrêt propre). */
@@ -457,7 +495,7 @@ function createPublisher(options = {}) {
     }
   }
 
-  return { enabled, channel, describe, check, publish, flush, statsRows, setupChannel, ensureBotRights };
+  return { enabled, channel, describe, check, publish, publishSquare, flush, statsRows, setupChannel, ensureBotRights };
 }
 
 const fromEnv = (channel = process.env.PUBLISH_CHANNEL) =>
@@ -470,6 +508,7 @@ module.exports = {
   describe: () => current.describe(),
   check: () => current.check(),
   publish: (win) => current.publish(win),
+  publishSquare: (item) => current.publishSquare(item),
   flush: () => current.flush(),
   statsRows: () => current.statsRows(),
   /** Canal publié en ce moment ('' si aucun). */
@@ -503,5 +542,6 @@ module.exports = {
   normalizeChannel,
   usernameCandidates,
   formatPost,
+  formatSquarePost,
   formatUsd,
 };

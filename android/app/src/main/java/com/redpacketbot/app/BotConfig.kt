@@ -32,10 +32,17 @@ data class BotConfig(
     val xEnabled: Boolean = false,
     val xAccounts: String = "",
     val xDryRun: Boolean = false,
+    // 🧧 Binance Square : liens et réponses repérés sur Telegram (src/square.js)
+    val squareEnabled: Boolean = true,
+    val squareChannels: String = DEFAULT_SQUARE_CHANNELS,
 ) {
     /** Canaux, un par entrée (virgules ou retours à la ligne acceptés). */
     val channelList: List<String>
         get() = targetChannels.split(',', '\n', ';').map { it.trim() }.filter { it.isNotEmpty() }
+
+    /** 🧧 Canaux de liens Binance Square, une entrée par canal. */
+    val squareChannelList: List<String>
+        get() = squareChannels.split(',', '\n', ';').map { it.trim() }.filter { it.isNotEmpty() }
 
     /** Comptes X, sans @, en minuscules. */
     val xAccountList: List<String>
@@ -96,6 +103,13 @@ data class BotConfig(
             if (!account.matches(X_HANDLE)) {
                 errors += "xAccounts" to
                     "Compte X « $account » : un pseudo de 1 à 15 lettres, chiffres ou _ (ex. @binance)."
+            }
+        }
+        for (channel in squareChannelList) {
+            val bare = bareChannel(channel)
+            if (!bare.matches(ID) && !bare.matches(USERNAME)) {
+                errors += "squareChannels" to
+                    "Canal « $channel » : mets @pseudo, un lien t.me/pseudo ou un ID numérique."
             }
         }
         return errors
@@ -173,6 +187,8 @@ data class BotConfig(
         put("X_ENABLED", xEnabled.toString())
         put("X_ACCOUNTS", xAccountList.joinToString(","))
         put("X_DRY_RUN", xDryRun.toString())
+        put("SQUARE_ENABLED", squareEnabled.toString())
+        put("SQUARE_CHANNELS", squareChannelList.joinToString(",") { normalizedChannel(it) })
     }
 
     fun toJson(): JSONObject = JSONObject().apply {
@@ -197,6 +213,8 @@ data class BotConfig(
         put("xEnabled", xEnabled)
         put("xAccounts", xAccounts)
         put("xDryRun", xDryRun)
+        put("squareEnabled", squareEnabled)
+        put("squareChannels", squareChannels)
     }
 
     fun save(file: File) = file.writeTextAtomic(toJson().toString(2))
@@ -230,10 +248,16 @@ data class BotConfig(
                 ?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.joinToString(", ")
                 ?: xAccounts,
             xDryRun = env["X_DRY_RUN"]?.let { it.trim().lowercase() == "true" } ?: xDryRun,
+            squareEnabled = env["SQUARE_ENABLED"]?.let { it.trim().lowercase() != "false" } ?: squareEnabled,
+            squareChannels = env["SQUARE_CHANNELS"]?.takeIf { it.isNotBlank() }
+                ?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.joinToString(",\n")
+                ?: squareChannels,
         )
     }
 
     companion object {
+        /** Le canal qui publie ces liens : réglage de départ, modifiable. */
+        const val DEFAULT_SQUARE_CHANNELS = "@Packet_Red"
         private const val EXAMPLE_API_HASH = "abcdef1234567890abcdef1234567890"
         private val ID = Regex("-?\\d+")
         private val USERNAME = Regex("[A-Za-z][A-Za-z0-9_]{3,31}")
@@ -279,6 +303,8 @@ data class BotConfig(
             xEnabled = o.optBoolean("xEnabled", false),
             xAccounts = o.optString("xAccounts"),
             xDryRun = o.optBoolean("xDryRun", false),
+            squareEnabled = o.optBoolean("squareEnabled", true),
+            squareChannels = o.optString("squareChannels", DEFAULT_SQUARE_CHANNELS),
         )
 
         /** Lecture d'un fichier .env : CLÉ=valeur, commentaires #, guillemets. */

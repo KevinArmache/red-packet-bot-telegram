@@ -20,6 +20,7 @@ Compte environ **20 minutes** sur le téléphone la première fois, plus le temp
 6. [La connexion Binance](#6-la-connexion-binance)
 7. [Les réglages du téléphone (écran Santé)](#7-les-réglages-du-téléphone-écran-santé)
 7 bis. [Les codes publiés sur X (Twitter)](#7-bis-les-codes-publiés-sur-x-twitter)
+7 ter. [🧧 Les Red Packets de Binance Square](#7-ter--les-red-packets-de-binance-square)
 8. [Au quotidien](#8-au-quotidien)
 9. [Le relais avec le PC](#9-le-relais-avec-le-pc)
 10. [Mettre à jour l'app](#10-mettre-à-jour-lapp)
@@ -276,6 +277,51 @@ Onglet **📡 Sources** → carte **🐦 X** : accès accordé ou non, appli X i
 - Si X coupe un long post dans sa notification (« … »), un code placé tout à la fin peut manquer.
 - Le téléphone doit être allumé, avec le bot en marche : un post arrivé bot arrêté est ignoré (il serait périmé au démarrage).
 - Confidentialité : l'app ignore toute notification qui ne vient pas de X. Pour X, elle garde seulement l'auteur et les 120 premiers caractères du dernier post (affichés dans 📡 Sources), dans son stockage privé.
+
+---
+
+## 7 ter. 🧧 Les Red Packets de Binance Square
+
+Ces Red Packets n'ont pas de code : ils sont attachés à un post Binance Square, et il faut souvent répondre à une question. Des canaux comme @Packet_Red publient le lien et la réponse. L'app les range dans un onglet à part, mais **c'est toi qui réclames** : les règles de Square interdisent les bots.
+
+**1. Mise en route**
+
+Dans **Réglages → 🧧 Red Packets Binance Square**, `@Packet_Red` est déjà rempli. Ajoute tes autres canaux de liens, un par ligne. Dans Telegram, abonne **le compte du téléphone** à ces canaux : sans ça, le bot ne relit que leurs 20 derniers messages à chaque démarrage.
+
+**2. Prendre un Red Packet**
+
+1. La notification « 🧧 N Red Packets à prendre » t'amène à l'onglet **🧧 Square**. Elle ne sonne qu'une fois, même si d'autres liens arrivent.
+2. Touche **🚀 Ouvrir et copier** : la réponse est copiée et Binance s'ouvre sur le post.
+3. Colle la réponse dans « Enter your answer », puis réclame.
+4. Reviens dans l'app : **🧧 Tu l'as pris ?** Réponds **🏆 Pris** ou **❌ Raté**.
+
+**▶️ Enchaîner** ouvre les Red Packets l'un après l'autre, du plus ancien au plus récent : à chaque retour, tu réponds, et le suivant s'ouvre.
+
+**3. S'y retrouver**
+
+| Liste | Ce qu'elle contient |
+|---|---|
+| 🟢 À prendre | Moins de 24 h, et rien fait dessus |
+| 👆 Ouverts | Ouverts dans Binance, sans réponse de ta part |
+| 🏆 Pris | Marqués « Pris » : publiés sur ton canal |
+| ⚫ Terminés | Ratés, masqués 🙈, ou plus de 24 h sans nouvelle |
+
+**🎚️ Filtres** : 🎯 Quiz, ⚡ Direct (sans question), ✅ Réponse connue, crypto, canal, ordre. Ils restent en place d'une ouverture à l'autre. Sur chaque carte :
+
+- **✅ Donnée par @canal** : la réponse vient de ce canal ;
+- **✅ Confirmée par 2 canaux** : deux canaux donnent la même ;
+- **⚠️ Autre réponse donnée** : deux canaux ne sont pas d'accord, essaie celle du dessus ;
+- **❓ Réponse à trouver** : le lien est là, mais aucune réponse.
+
+**4. Ton canal**
+
+Chaque **🏆 Pris** publie sur ton canal (⚙️ Réglages → 📣) le lien et la réponse. Le parrainage des autres est retiré du lien. Bot arrêté, la publication part à son redémarrage si ton « Pris » a moins de 24 h. Un post n'est jamais publié deux fois.
+
+**Limites, en toute honnêteté :**
+
+- L'app ne regarde pas Binance : elle ne sait pas si un Red Packet est épuisé avant que tu l'ouvres. Une carte peut donc mener à un Red Packet vide.
+- La crypto ne s'affiche que si le canal la donne (@Packet_Red écrit souvent `CLAIM ~`).
+- Les comptes que tu suis sur Binance Square ne sont pas surveillés.
 
 ---
 
