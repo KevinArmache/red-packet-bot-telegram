@@ -209,6 +209,16 @@ const RE_INLINE_LETTERS = /(?<![A-Za-z0-9])[A-Z]{8}(?![A-Za-z0-9])/g;
 const RE_RARE_LETTER = /[JKQVWXZ]/;
 const RE_TRADING_PAIR = /(?:USDT|USDC|BUSD|TUSD|USD|EUR|TRY|BTC|ETH|BNB)$/;
 
+// Paramètres de parrainage d'un lien (« ?ref=AB12CD34 », « &r=K1H0AFHZ ») : ils
+// ressemblent à des codes, mais n'en sont jamais.
+const RE_REFERRAL_PARAM = /[?&](?:r|ref|referral|invitecode|uco)=[^\s&#]*/gi;
+
+// Lien vers un post Binance Square (Red Packet Quiz) : partagé depuis l'appli
+// (uni-qr/cpos : post, uni-qr/cart : article) ou adresse du site, avec ou sans
+// titre devant le numéro.
+const RE_SQUARE_LINK =
+  /binance\.(?:com|info)\/(?:uni-qr\/[a-z]+\/\d|(?:[a-z]{2}(?:-[a-z]{2,4})?\/)?(?:square|feed)\/post\/(?:[a-z0-9-]*-)?\d)/i;
+
 // Exclure les messages destinés à d'autres plateformes si Binance n'est pas mentionné
 const IGNORED_EXCHANGES =
   /bybit|okx|bitget|kucoin|mexc|gate\.?io|huobi|htx|bingx/i;
@@ -295,7 +305,8 @@ function lineCodes(line) {
  * codes. L'anti-blocage (src/antiban.js) s'en sert quand la marge d'essais
  * Binance devient faible.
  *
- * @param {{ plain: string, trusted: string[] }} sources
+ * @param {{ plain: string, trusted: string[], square?: boolean }} sources
+ *   square : le message contient un lien Binance Square (buildMessageSources).
  * @param {{ includeKnown?: boolean, inlineLetters?: boolean }} [options]
  *   includeKnown : ne pas écarter les codes déjà traités (l'appelant les
  *   compte lui-même). inlineLetters : codes 100 % lettres pris aussi au
@@ -322,8 +333,12 @@ function extractCodes(sources, options = {}) {
     if (!found.has(code)) found.set(code, source);
   };
 
-  // 1. Sources de confiance (monospace, boutons cryptobox…) — niveau souple
-  for (const segment of sources.trusted) {
+  const list = () => [...found].map(([code, source]) => ({ code, source }));
+
+  // 1. Sources de confiance (monospace, boutons cryptobox…) — niveau souple.
+  //    Avec un lien Binance Square, le monospace donne la réponse du quiz
+  //    (« HAPPY BIRTHDAY »), pas un code.
+  for (const segment of sources.square ? [] : sources.trusted) {
     for (const m of segment.toUpperCase().matchAll(RE_RELAXED)) {
       add(m[0], true, "monospace");
     }
@@ -337,6 +352,10 @@ function extractCodes(sources, options = {}) {
   for (const m of plain.matchAll(RE_LABELLED)) {
     if (/\d/.test(m[1]) || m[1] === m[1].toUpperCase()) add(m[1], true, "label");
   }
+
+  // Lien Binance Square : le reste du message parle du quiz. Seuls un lien
+  // Cryptobox ou un « Code : » explicite comptent.
+  if (sources.square) return list();
 
   // 4. Code seul sur sa ligne — niveau souple : les codes 100 % lettres
   //    (« LJSSNXTT », « PABVFEBL ») ne sont plus ratés. Seulement dans un
@@ -364,7 +383,7 @@ function extractCodes(sources, options = {}) {
     }
   }
 
-  return [...found].map(([code, source]) => ({ code, source }));
+  return list();
 }
 
 /**
@@ -439,7 +458,10 @@ function buildMessageSources(msg) {
     /* média illisible */
   }
 
-  return { plain: parts.join("\n"), trusted };
+  // Ici et pas dans extractCodes : les posts X n'y passent pas, leur détection
+  // reste celle qu'elle est.
+  const plain = parts.join("\n").replace(RE_REFERRAL_PARAM, "");
+  return { plain, trusted, square: RE_SQUARE_LINK.test(plain) };
 }
 
 // ─── Création et authentification du client ───────────────────────────────

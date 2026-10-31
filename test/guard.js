@@ -390,6 +390,105 @@ async function main() {
     check("Telegram : code 100 % lettres dans une phrase toujours ignoré", plain("Red packet LJSSNXTT pour vous"), []);
   }
 
+  // Vrais messages de @Packet_Red et @BoxxSquare (31/10/2026) : sans ce filtre,
+  // chaque lien aurait fait taper un faux code sur Binance
+  section("Liens Binance Square : ni parrainage ni réponse de quiz pris pour un code");
+  {
+    const { extractCodes, buildMessageSources } = require("../src/telegram");
+    const fromMessage = (text, monospace = [], links = []) =>
+      extractCodes(
+        buildMessageSources({
+          text,
+          entities: [
+            ...monospace.map((value) => ({ kind: "code", text: value })),
+            ...links.map((url) => ({ params: { kind: "text_link", url } })),
+          ],
+        }),
+      );
+    const SHARE = "l=en&uco=RuKwa52qfzj0kySZaeGdVQ&uc=app_square_share_link&us=copylink";
+    const packetRed = (coin, answer, link) =>
+      `🎁 ${coin} 🎁\n🎰 ${coin} ~ | Random 🎲\n🎯Answer » ${answer}\n💎Ans » ✨${answer}✨\n🧧@Packet_Red #Square #Crypto\n${link}`;
+
+    const samples = [
+      ["PEPE", "CLAIM BOX", `https://app.binance.com/uni-qr/cart/383187948524759?r=K1H0AFHZ&l=zh-CN&uco=yLHmM-0IgS12JdgmQk7McA&uc=app_square_share_link&us=copylink`],
+      ["USDT", "HAPPY BIRTHDAY", `https://app.binance.com/uni-qr/cpos/383084365843426?r=UZJQUBIZ&l=en&uco=nznHbWNWgMzj4lsWdS7CWg&uc=app_square_share_link&us=copylink`],
+      ["CLAIM", "BONK", `https://app.binance.com/uni-qr/cpos/382745767318880?r=KNO8CAYD&${SHARE}`],
+      ["USDT", "omenx", `https://app.binance.com/uni-qr/cpos/383180021216501?r=CDKD39G1&${SHARE}`],
+      ["USDT", "SOL", `https://app.binance.com/uni-qr/cpos/382836155944678?r=AY05GU4H&${SHARE}`],
+      ["SHIB", "BTC", `https://app.binance.com/uni-qr/cpos/383128620584011?r=F0PRJ6ZZ&${SHARE}`],
+      ["USDT", "16", `https://app.binance.com/uni-qr/cpos/383114805315577?r=OZ0M85S8&${SHARE}`],
+      ["BNB", "BNB", "https://app.binance.com/uni-qr/cpos/383152611116458?uc=app_square_share_link&us=copylink"],
+    ];
+    for (const [coin, answer, link] of samples) {
+      check(`@Packet_Red « ${answer} » : aucun code`, fromMessage(packetRed(coin, answer, link), [answer]), []);
+      check(`@Packet_Red « ${answer} », lien masqué : aucun code`, fromMessage(packetRed(coin, answer, ""), [answer], [link]), []);
+    }
+    check(
+      "réponse de 8 caractères qui ressemble à un code",
+      fromMessage(packetRed("USDT", "BINANCE1", samples[7][2]), ["BINANCE1"]),
+      [],
+    );
+    check(
+      "format @BoxxSquare : titre avec lien, réponse seule sur sa ligne",
+      fromMessage("💓 BTC 💓\nBNB12345", ["BNB12345"], [`https://app.binance.com/uni-qr/cpos/383184190000000?r=K1TVI5ID&${SHARE}`]),
+      [],
+    );
+    for (const link of [
+      "https://www.binance.com/fr/square/post/383107779195016",
+      "https://www.binance.com/fr-AF/square/post/626529",
+      "https://www.binance.com/ar/feed/post/859765",
+      "https://www.binance.com/ar/square/post/06-04-2025-binance-issues-warning-25156807837810",
+    ]) {
+      check(`adresse du site reconnue : ${link}`, fromMessage(`Réponse : AB12CD34\n${link}`, ["AB12CD34"]), []);
+    }
+
+    // Un vrai code à côté d'un lien Square n'est pas perdu
+    check(
+      "« Code : » à côté d'un lien Square : pris",
+      fromMessage(`Code : AB12CD34\nhttps://app.binance.com/uni-qr/cpos/383107779195016?r=K1H0AFHZ&${SHARE}`),
+      [{ code: "AB12CD34", source: "label" }],
+    );
+    check(
+      "lien Cryptobox à côté d'un lien Square : pris",
+      fromMessage(
+        "https://www.binance.com/fr/my/wallet/account/payment/cryptobox/LM34NP56\nhttps://www.binance.com/fr/square/post/383107779195016",
+      ),
+      [{ code: "LM34NP56", source: "lien" }],
+    );
+
+    // Tous les canaux : un parrainage n'est jamais un code, le reste ne change pas
+    check("parrainage dans un lien : ignoré", fromMessage("Inscris-toi https://accounts.binance.com/register?ref=AB12CD34"), []);
+    check(
+      "vrai code à côté d'un parrainage",
+      fromMessage("XY98ZW76 https://accounts.binance.com/register?a=1&ref=AB12CD34"),
+      [{ code: "XY98ZW76", source: "texte" }],
+    );
+    check(
+      "lien sans Square : le monospace reste un code",
+      fromMessage("Vite https://t.me/moncanal", ["AB12CD34"]),
+      [{ code: "AB12CD34", source: "monospace" }],
+    );
+    check(
+      "profil Square, pas un post : le monospace reste un code",
+      fromMessage("Suis-moi https://www.binance.com/fr/square/profile/omenx-official", ["AB12CD34"]),
+      [{ code: "AB12CD34", source: "monospace" }],
+    );
+    check(
+      "lien Cryptobox « ?code= » toujours lu",
+      fromMessage("https://www.binance.com/fr/my/wallet/account/payment/cryptobox?code=LM34NP56&ref=AB12CD34"),
+      [{ code: "LM34NP56", source: "lien" }],
+    );
+
+    // Détection X : inchangée, même avec un lien Square dans le post
+    const x = require("../src/xsource");
+    const post = x.parsePost({
+      pkg: "com.twitter.android",
+      postedAt: 1_800_000_000_000,
+      text: "AB12CD34 https://app.binance.com/uni-qr/cpos/383107779195016",
+    });
+    check("post X avec lien Square : détection inchangée", x.extractFromPost(post), [{ code: "AB12CD34", source: "texte" }]);
+  }
+
   // ─── X (Twitter) : posts lus dans les notifications, relais #xcode ────────
   section("X (Twitter) : posts et relais #xcode");
   {
