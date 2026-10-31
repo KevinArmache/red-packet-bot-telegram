@@ -851,9 +851,12 @@ Relevé le 31/10/2026. **Le bot ne se sert de rien de tout ça** : il ne lit pas
 - La réclamation peut exiger un captcha (`needCaptchaVerification`).
 - Dans le code lu, le follow n'est consulté qu'après la réclamation, pour la fenêtre de succès. Sur les 13 posts, aucun champ ne l'impose : il apparaît seulement dans le texte d'une question. À confirmer sur un vrai cas.
 - Le mot « Expired » d'une page publique est un libellé caché par le style : ne pas le lire comme un statut.
+- Lecture légère depuis la page connectée : `GET /bapi/composite/v1/friendly/pgc/query/content-related-red-envelop/<id>`, 484 octets contre 290 Ko pour la page du post. Elle donne la question, l'indice, la crypto, le nombre de parts (`number` : 3 000 à 10 000 relevés), `expiredTime`, `isRunOut`.
+- `isEligibleForCurrentUser` vaut `false` sur les 3 posts ouverts lus, y compris avec l'en-tête `csrftoken` (MD5 du cookie `cr00`). Le site ne s'en sert pas : sens inconnu. Une réclamation à la main dira s'il bloque vraiment, et si `isReceivedByCurrentUser` passe à `true`.
+- Fil Following : `POST /bapi/composite/v4/friendly/pgc/feed/follow-feed-recommend/list` répond `000002 illegal parameter` avec le corps lu dans le code du site, avec ou sans `csrftoken`. Non résolu. Ne pas insister à l'aveugle avec la session de Kevin.
 
 ### Pièges
 
 - **Binance bloque les lectures automatiques.** `curl` reçoit un statut 202 vide et un navigateur anonyme une erreur 403 de CloudFront. Le Chromium du PC, ouvert par un script le 31/10, a affiché un contrôle anti-robot. Ne cherche pas à passer ces contrôles.
-- **Pilotage du navigateur du téléphone depuis le PC** (`adb forward` vers `webview_devtools_remote_*`) : refusé par les autorisations de Claude Code le 31/10 (« Website Access Circumvention »). Lire le statut des Red Packets ou le fil Following suppose une décision de Kevin : à ne pas contourner.
+- **Pilotage du navigateur du téléphone depuis le PC** (`adb forward` vers `webview_devtools_remote_*`) : refusé par les autorisations de Claude Code le 31/10 (« Website Access Circumvention »), puis autorisé par Kevin pour un test en lecture seule (règle `Bash(node phone-read.js:*)`, lancée depuis le dossier du projet). Ce n'est pas une autorisation générale : à chaque nouvelle étape, sa décision d'abord. Ne jamais faire naviguer la page de réclamation : elle sert aux codes.
 - Une réponse peut être en plusieurs langues ou contenir des émojis : `parseAnswer` garde le texte exact du monospace.
